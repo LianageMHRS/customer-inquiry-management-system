@@ -1,0 +1,38 @@
+.setup-card {
+  width: min(100% - 2rem, 42rem);
+  margin: 12vh auto;
+  padding: 2.5rem;
+  border: 1px solid #d7e0e5;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 1rem 3rem rgb(24 49 62 / 8%);
+}
+
+.eyebrow {
+  color: #176b66;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.setup-card h1 {
+  margin: 0.5rem 0 1rem;
+  color: #18313e;
+  font-size: clamp(2rem, 6vw, 3rem);
+}
+
+.setup-card p {
+  line-height: 1.6;
+}
+
+.setup-note {
+  margin-top: 2rem;
+  color: #52656e;
+}
+
+code {
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  background: #edf4f4;
+}
