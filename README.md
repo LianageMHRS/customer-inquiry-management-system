@@ -11,11 +11,11 @@ stores staff accounts, inquiries, and sessions.
 - `scripts`: small cross-platform development helpers.
 - `docs`: assessment documentation added as the implementation progresses.
 
-Within the API, routes will connect HTTP requests to controllers, services will
-enforce business rules, and repositories will own application queries. The API
-uses `pg` to access PostgreSQL; `node-pg-migrate` applies versioned SQL files so
-the same schema can be recreated consistently. The browser uses Vite's `/api`
-proxy in development so requests share the web origin.
+Within the API, routes connect HTTP requests to controllers, services enforce
+business rules, and repositories own application queries. The API uses `pg` to
+access PostgreSQL; `node-pg-migrate` applies versioned SQL files so the same
+schema can be recreated consistently. The browser uses Vite's `/api` proxy in
+development so requests share the web origin.
 
 ## Prerequisites
 
@@ -79,7 +79,9 @@ unchanged on repeated runs.
 
 ## Current phase status
 
-Phase 1 established the workspace, development servers, strict TypeScript
-settings, and baseline lint/format tooling. Phase 2 is adding the PostgreSQL
-schema. Authentication and inquiry workflows will be implemented in later
-phases.
+Phase 1 established the workspace and development tooling. Phase 2 added the
+PostgreSQL schema and seed process. Phase 3 added browser sign-in and
+server-side sessions. Phase 4 implements the protected inquiry API, including
+create, owner-scoped list/detail, search/filter/pagination, duplicate handling,
+and versioned status updates. The assessment's full frontend and stale-data
+requirements in Phases 5–6 are not yet complete.

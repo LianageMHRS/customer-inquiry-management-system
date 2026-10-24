@@ -1,0 +1,12 @@
+{
+  "name": "@customer-inquiry/shared",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./inquiry": {
+      "types": "./inquiry.d.ts",
+      "import": "./inquiry.js"
+    }
+  }
+}
