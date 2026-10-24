@@ -34,9 +34,19 @@ if (
 
 const cleanupPool = new Pool({ connectionString: cleanupConnectionString })
 
-function getSessionId(response: Response): string {
+function getSetCookies(response: Response): string[] {
   const cookies = response.headers['set-cookie']
-  const sessionCookie = cookies?.find((cookie) => cookie.startsWith('cim.sid='))
+  if (cookies === undefined) {
+    return []
+  }
+
+  return Array.isArray(cookies) ? cookies : [cookies]
+}
+
+function getSessionId(response: Response): string {
+  const sessionCookie = getSetCookies(response).find((cookie) =>
+    cookie.startsWith('cim.sid='),
+  )
 
   if (sessionCookie === undefined) {
     throw new Error('Expected the API to set a session cookie')
@@ -121,7 +131,7 @@ describe('authentication API', () => {
     expect(csrfResponse.status).toBe(200)
     expect(csrfResponse.headers['cache-control']).toBe('no-store')
     expect(typeof csrfResponse.body.data.csrfToken).toBe('string')
-    const cookies = csrfResponse.headers['set-cookie'] ?? []
+    const cookies = getSetCookies(csrfResponse)
     expect(cookies.find((cookie) => cookie.startsWith('cim.sid='))).toMatch(
       /HttpOnly/i,
     )

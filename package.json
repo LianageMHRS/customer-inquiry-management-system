@@ -18,6 +18,8 @@
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{js,mjs,cjs,ts,tsx,json,md,css,html}\"",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:frontend": "npm run test --workspace=@customer-inquiry/web",
+    "test:backend": "npm run test --workspace=@customer-inquiry/api",
     "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
