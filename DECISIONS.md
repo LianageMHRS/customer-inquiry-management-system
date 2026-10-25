@@ -44,10 +44,12 @@ though, so they do not automatically test the whole website connected to the
 database. I have also not tested the system with many requests arriving at
 once or with several people editing inquiry details simultaneously.
 
-If I continue the project, I would add those tests and improve how the app
-checks that its database is available. I would also make sure the demo
-account is shared privately with reviewers rather than putting its password
-in the project.
+If I continue the project, If I continue developing the application, I would consider the following improvements:
+Add inquiry change history: Record important status changes, including the previous status, new status, staff member, and timestamp. This would help staff understand how an inquiry has progressed.
+
+Consider inquiry editing: Allow staff to correct customer or inquiry details if the business requires this functionality. Any editing feature should include appropriate validation, ownership checks, and stale-data protection.
+
+Consider inquiry deletion or archiving: If required by the business, introduce an appropriately authorized way to remove or archive inquiries. Archiving may be preferable when retaining customer-service records is important.
 
 ## Use of AI
 
