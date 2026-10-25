@@ -31,6 +31,7 @@ const inquiryFields: readonly InquiryField[] = [
 
 type InquiryListStatus = InquiryStatus | 'ALL'
 
+/** Check a URL-derived status before using it as an inquiry filter. */
 function isInquiryListStatus(value: string): value is InquiryListStatus {
   return (
     value === 'ALL' ||
@@ -52,6 +53,7 @@ type AuthResponse = {
   }
 }
 
+/** Coordinate sign-in, inquiry navigation, list state, and user actions. */
 function App() {
   const inquiryDetailMatch = useMatch('/inquiries/:inquiryId')
   const navigate = useNavigate()
@@ -66,6 +68,7 @@ function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
+  const [conflictMessage, setConflictMessage] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingInquiries, setIsLoadingInquiries] = useState(false)
   const [inquiryListError, setInquiryListError] = useState('')
@@ -73,6 +76,7 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false)
 
+  // Turn expired-session events into a return to the sign-in screen.
   useEffect(() => {
     function handleUnauthenticated() {
       setUser(null)
@@ -86,6 +90,7 @@ function App() {
     }
   }, [navigate])
 
+  // Restore the existing server-side session when the app first loads.
   useEffect(() => {
     let isMounted = true
 
@@ -122,6 +127,7 @@ function App() {
     }
   }, [])
 
+  // Reload owner-scoped inquiries whenever filters or refresh state changes.
   useEffect(() => {
     if (user === null) {
       setInquiries([])
@@ -130,6 +136,7 @@ function App() {
       return
     }
 
+    // Ignore late responses after filters change or this screen unmounts.
     let isMounted = true
 
     async function loadInquiries() {
@@ -175,6 +182,7 @@ function App() {
     }
   }, [user, search, statusFilter, page, inquiryListRefresh, inquiryListRetry])
 
+  /** Sign in through the API and retain only the public staff identity. */
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setMessage('')
@@ -204,6 +212,7 @@ function App() {
     }
   }
 
+  /** End the server session and return the interface to the sign-in screen. */
   async function handleSignOut() {
     setMessage('')
     setIsSubmitting(true)
@@ -225,6 +234,7 @@ function App() {
     }
   }
 
+  /** Submit validated form data and map API field errors back to the form. */
   async function handleCreateInquiry(
     values: InquiryFormValues,
     setFieldError: UseFormSetError<InquiryFormValues>,
@@ -275,8 +285,10 @@ function App() {
     }
   }
 
+  /** Submit a versioned status change and refresh after success or conflict. */
   async function handleStatusChange(inquiry: Inquiry, status: InquiryStatus) {
     setMessage('')
+    setConflictMessage(false)
     setIsSubmitting(true)
 
     try {
@@ -285,6 +297,7 @@ function App() {
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
+          // Send the version displayed in this row so the API can reject stale tabs.
           body: JSON.stringify({
             status,
             expectedVersion: inquiry.version,
@@ -297,9 +310,7 @@ function App() {
     } catch (error) {
       if (isApiError(error) && error.status === 409) {
         setInquiryListRefresh((current) => current + 1)
-        setMessage(
-          'This inquiry changed elsewhere. The latest status is now shown.',
-        )
+        setConflictMessage(true)
         return
       }
 
@@ -424,6 +435,20 @@ function App() {
                 className="panel inquiries-panel"
                 aria-labelledby="list-title"
               >
+                {conflictMessage && (
+                  <div className="conflict-notice" role="alert">
+                    <span className="conflict-notice-icon" aria-hidden="true">
+                      !
+                    </span>
+                    <div>
+                      <h2>This inquiry was updated elsewhere</h2>
+                      <p>
+                        We refreshed the list with the latest status. Review it
+                        before making another change.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className="panel-heading list-heading">
                   <div>
                     <h2 id="list-title">Your inquiries</h2>

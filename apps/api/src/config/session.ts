@@ -6,6 +6,7 @@ import { pool } from '../db/pool.js'
 
 const PgSessionStore = connectPgSimple(session)
 
+/** Configure persistent, secure browser sessions for the API. */
 export const sessionMiddleware = session({
   name: 'cim.sid',
   secret: env.SESSION_SECRET,
@@ -14,6 +15,7 @@ export const sessionMiddleware = session({
     tableName: 'session',
     createTableIfMissing: false,
     pruneSessionInterval: env.NODE_ENV === 'test' ? false : 900,
+    // Log storage failures without exposing session credentials.
     errorLog: (error) => logger.error({ err: error }, 'Session store error'),
   }),
   resave: false,

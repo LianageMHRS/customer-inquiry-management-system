@@ -24,6 +24,7 @@ const onePage: InquiryPagination = {
   totalPages: 1,
 }
 
+/** Render result rows with defaults that individual cases can override. */
 function renderResults(
   overrides: Partial<Parameters<typeof InquiryResults>[0]> = {},
 ) {
@@ -47,10 +48,12 @@ function renderResults(
 }
 
 describe('InquiryResults', () => {
+  // Remove mounted result tables between display-state checks.
   afterEach(() => {
     cleanup()
   })
 
+  // Show an accessible progress message while a list request is pending.
   it('shows a loading message while inquiries are loading', () => {
     renderResults({ isLoading: true })
 
@@ -59,6 +62,7 @@ describe('InquiryResults', () => {
     )
   })
 
+  // Distinguish a truly empty account from filters with no matching rows.
   it('shows an empty-state message based on whether filters are active', () => {
     const { rerender } = renderResults({ inquiries: [] })
     expect(
@@ -88,6 +92,7 @@ describe('InquiryResults', () => {
     ).toBeTruthy()
   })
 
+  // Hide unnecessary one-page navigation and wire multi-page controls.
   it('hides one-page controls and changes page when Next is clicked', () => {
     const singlePageRender = renderResults()
     expect(
@@ -111,6 +116,7 @@ describe('InquiryResults', () => {
     expect(onPageChange).toHaveBeenCalledWith(2)
   })
 
+  // Display inquiry information with a link to its detail route.
   it('shows the inquiry and its detail link', () => {
     renderResults()
 

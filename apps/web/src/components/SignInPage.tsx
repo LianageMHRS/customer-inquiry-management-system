@@ -10,6 +10,7 @@ type SignInPageProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
 
+/** Present the staff sign-in form and its accessible feedback message. */
 export function SignInPage({
   email,
   password,

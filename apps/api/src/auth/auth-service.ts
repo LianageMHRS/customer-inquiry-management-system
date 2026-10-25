@@ -6,6 +6,7 @@ import type { PublicUser } from './auth-repository.js'
 
 const dummyPasswordHash = hashPassword(randomBytes(32).toString('hex'))
 
+/** Verify credentials without revealing whether an email address exists. */
 export async function authenticate(
   email: string,
   password: string,
@@ -13,6 +14,7 @@ export async function authenticate(
   const user = await findUserByEmail(email)
 
   if (user === null) {
+    // Keep unknown-email attempts on a password-hash verification path too.
     await argon2.verify(await dummyPasswordHash, password)
     return null
   }

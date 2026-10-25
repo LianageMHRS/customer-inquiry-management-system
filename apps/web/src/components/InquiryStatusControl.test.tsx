@@ -17,10 +17,12 @@ const resolvedInquiry: Inquiry = {
 }
 
 describe('InquiryStatusControl', () => {
+  // Ensure the resolved inquiry can be unmounted between transition checks.
   afterEach(() => {
     cleanup()
   })
 
+  // Use the clear Reopen label for the resolved-to-in-progress transition.
   it('labels the allowed transition from resolved as Reopen', () => {
     render(
       <InquiryStatusControl
@@ -34,6 +36,7 @@ describe('InquiryStatusControl', () => {
     expect(screen.queryByRole('option', { name: 'In progress' })).toBeNull()
   })
 
+  // Send the valid reopen transition through the supplied change handler.
   it('sends the resolved inquiry through the existing reopen transition', () => {
     const onStatusChange = vi.fn()
 

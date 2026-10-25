@@ -7,6 +7,7 @@ const ARGON2ID_OPTIONS: HashOptions = {
   hashLength: 32,
 }
 
+/** Hash a password using the project's configured Argon2id work factors. */
 export function hashPassword(password: string): Promise<string> {
   return argon2.hash(password, ARGON2ID_OPTIONS)
 }

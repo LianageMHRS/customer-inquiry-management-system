@@ -22,6 +22,7 @@ type InquiryResultsProps = {
   onStatusChange: (inquiry: Inquiry, status: Inquiry['status']) => void
 }
 
+/** Render inquiry rows together with loading, error, empty, and paging states. */
 export function InquiryResults({
   inquiries,
   pagination,

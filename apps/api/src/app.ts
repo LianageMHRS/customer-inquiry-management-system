@@ -14,6 +14,7 @@ import { errorHandler } from './middleware/error-handler.js'
 import { originProtection } from './middleware/origin-protection.js'
 import { inquiryRouter } from './inquiries/inquiry-routes.js'
 
+/** Build the Express app with shared security, API, and error middleware. */
 export function createApp() {
   const app = express()
 
@@ -29,6 +30,7 @@ export function createApp() {
       maxAge: 600,
     }),
   )
+  // Inquiry and session responses can contain private data; never cache them.
   app.use('/api', (_request, response, next) => {
     response.setHeader('Cache-Control', 'no-store')
     next()
@@ -44,6 +46,7 @@ export function createApp() {
       limit: 100,
       standardHeaders: true,
       legacyHeaders: false,
+      // Keep rate-limit failures in the same JSON error format as other API errors.
       handler: (_request, _response, next) => {
         next(new AppError(429, 'RATE_LIMITED', 'Too many requests'))
       },
@@ -52,12 +55,14 @@ export function createApp() {
   app.use('/api', originProtection)
   app.use('/api', doubleCsrfProtection)
 
+  // Report process health without exposing configuration or database details.
   app.get('/api/health', (_request, response) => {
     response.json({ data: { status: 'ok' } })
   })
 
   app.use('/api/auth', authRouter)
   app.use('/api/inquiries', inquiryRouter)
+  // Convert unmatched API paths into the standard error response.
   app.use('/api', (_request, _response, next) => {
     next(
       new AppError(404, 'NOT_FOUND', 'The requested API route was not found'),

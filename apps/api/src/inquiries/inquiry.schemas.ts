@@ -14,6 +14,7 @@ const contactSchema = z
   .trim()
   .min(1)
   .max(INQUIRY_FIELD_LIMITS.contact)
+  // Accept email or a phone number with the required digit count.
   .refine(
     (contact) => {
       if (z.email().safeParse(contact).success) {
@@ -62,6 +63,7 @@ export const inquiryListQuerySchema = z
       .min(1)
       .max(Number.MAX_SAFE_INTEGER)
       .default(DEFAULT_INQUIRY_PAGE_SIZE)
+      // Clamp oversized requests so list queries stay bounded.
       .transform((pageSize) => Math.min(pageSize, MAX_INQUIRY_PAGE_SIZE)),
     sort: z.enum(INQUIRY_SORT_OPTIONS).default('newest'),
   })

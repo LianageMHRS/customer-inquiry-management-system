@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { hashPassword } from '../src/security/password.js'
 
 describe('hashPassword', () => {
+  // Verify hashes are Argon2id, do not expose plaintext, and reject other passwords.
   it('creates an Argon2id hash that verifies only the original password', async () => {
     const password = 'development-password-for-test'
     const passwordHash = await hashPassword(password)

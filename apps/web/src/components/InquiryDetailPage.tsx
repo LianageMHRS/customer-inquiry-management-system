@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { apiRequest, isApiError } from '../api/client.js'
 import { inquiryStatusLabels, type Inquiry } from '../types/inquiry.js'
 
+/** Load and display one authorized inquiry with retryable request states. */
 export function InquiryDetailPage({ inquiryId }: { inquiryId: string }) {
   const [inquiry, setInquiry] = useState<Inquiry | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -11,6 +12,7 @@ export function InquiryDetailPage({ inquiryId }: { inquiryId: string }) {
   const [reloadCount, setReloadCount] = useState(0)
 
   useEffect(() => {
+    // Avoid updating state if a slow request finishes after navigation away.
     let isMounted = true
 
     async function loadInquiry() {

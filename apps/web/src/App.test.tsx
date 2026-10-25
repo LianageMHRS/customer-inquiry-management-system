@@ -46,6 +46,7 @@ const pagination = {
   totalPages: 1,
 }
 
+/** Render the full application inside an in-memory router for navigation tests. */
 function renderApp() {
   return render(
     <MemoryRouter>
@@ -55,11 +56,13 @@ function renderApp() {
 }
 
 describe('App', () => {
+  // Reset rendered DOM and mocks so each app scenario starts cleanly.
   afterEach(() => {
     cleanup()
     vi.resetAllMocks()
   })
 
+  // Verify a valid login loads the authenticated inquiry dashboard.
   it('signs in and loads the inquiry dashboard', async () => {
     mockedApiRequest
       .mockRejectedValueOnce(new ApiError('Not signed in', 401, 'UNAUTHORIZED'))
@@ -93,6 +96,7 @@ describe('App', () => {
     )
   })
 
+  // Keep the entered email visible while showing a rejected-login message.
   it('shows a sign-in error and keeps the email when credentials are rejected', async () => {
     mockedApiRequest
       .mockRejectedValueOnce(new ApiError('Not signed in', 401, 'UNAUTHORIZED'))
@@ -115,6 +119,7 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Staff sign in' })).toBeTruthy()
   })
 
+  // Confirm a failed list request can be retried without reloading the app.
   it('retries a failed inquiry-list request from the dashboard', async () => {
     mockedApiRequest
       .mockResolvedValueOnce({ data: { user } })
@@ -136,6 +141,7 @@ describe('App', () => {
     })
   })
 
+  // Ensure user-selected search and status filters are sent to the API.
   it('submits search and status filters as inquiry-list query parameters', async () => {
     mockedApiRequest
       .mockResolvedValueOnce({ data: { user } })
@@ -173,6 +179,7 @@ describe('App', () => {
     ).toBeTruthy()
   })
 
+  // Show server field errors on the form and retain values for correction.
   it('shows API field errors and preserves values after a failed create', async () => {
     mockedApiRequest
       .mockResolvedValueOnce({ data: { user } })
@@ -215,6 +222,7 @@ describe('App', () => {
     ).toBe('true')
   })
 
+  // Refresh stale data and prominently tell staff another update won.
   it('refreshes the list and reports a stale status conflict', async () => {
     mockedApiRequest
       .mockResolvedValueOnce({ data: { user } })
@@ -223,7 +231,14 @@ describe('App', () => {
         new ApiError('Changed elsewhere', 409, 'STALE_VERSION'),
       )
       .mockResolvedValueOnce({
-        data: [{ ...inquiry, status: 'IN_PROGRESS', version: 2 }],
+        data: [
+          {
+            ...inquiry,
+            status: 'IN_PROGRESS',
+            allowedNextStatuses: ['RESOLVED'],
+            version: 2,
+          },
+        ],
         pagination,
       })
 
@@ -233,17 +248,38 @@ describe('App', () => {
       target: { value: 'IN_PROGRESS' },
     })
 
+    const conflictNotice = await screen.findByRole('alert')
+    expect(conflictNotice.textContent).toContain(
+      'This inquiry was updated elsewhere',
+    )
+    expect(conflictNotice.textContent).toContain(
+      'We refreshed the list with the latest status.',
+    )
     expect(
-      await screen.findByText(
-        'This inquiry changed elsewhere. The latest status is now shown.',
-      ),
-    ).toBeTruthy()
+      screen
+        .getByRole('region', { name: 'Your inquiries' })
+        .contains(conflictNotice),
+    ).toBe(true)
     await waitFor(() => {
+      expect(screen.getByLabelText('Status:')).toHaveProperty(
+        'value',
+        'IN_PROGRESS',
+      )
       expect(
         mockedApiRequest.mock.calls.filter(([path]) =>
           path.startsWith('/api/inquiries?'),
         ),
       ).toHaveLength(2)
     })
+    expect(mockedApiRequest).toHaveBeenCalledWith(
+      `/api/inquiries/${inquiry.id}/status`,
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'IN_PROGRESS',
+          expectedVersion: inquiry.version,
+        }),
+      }),
+    )
   })
 })

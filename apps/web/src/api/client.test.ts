@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apiRequest, isApiError, UNAUTHENTICATED_EVENT } from './client.js'
 
 describe('apiRequest', () => {
+  // Restore global fetch and spies between request scenarios.
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
+  // Mutations must fetch a CSRF token and include the session cookie.
   it('fetches and sends a CSRF token for mutation requests', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -38,6 +40,7 @@ describe('apiRequest', () => {
     expect(requestInit?.credentials).toBe('include')
   })
 
+  // Notify the app when an ordinary authenticated request discovers expiry.
   it('signals the app when a request returns an expired-session response', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
@@ -72,6 +75,7 @@ describe('apiRequest', () => {
     }
   })
 
+  // Do not treat expected login rejection as an expired signed-in session.
   it('does not signal expired session for expected unauthenticated requests', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

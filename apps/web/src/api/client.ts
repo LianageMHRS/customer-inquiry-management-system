@@ -27,10 +27,12 @@ type ApiRequestOptions = {
   ignoreUnauthorized?: boolean
 }
 
+/** Narrow unknown JSON values before reading API response properties. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+/** Parse response JSON or report a typed error for malformed responses. */
 async function parseResponseJson(response: Response): Promise<unknown> {
   try {
     return await response.json()
@@ -43,6 +45,7 @@ async function parseResponseJson(response: Response): Promise<unknown> {
   }
 }
 
+/** Keep only valid string-array field messages from an unknown payload. */
 function getFieldErrors(value: unknown): ApiFieldErrors {
   if (!isRecord(value)) {
     return {}
@@ -63,6 +66,7 @@ function getFieldErrors(value: unknown): ApiFieldErrors {
   return fieldErrors
 }
 
+/** Convert the server error envelope into the client's typed error class. */
 async function createApiError(
   response: Response,
   ignoreUnauthorized: boolean,
@@ -89,6 +93,7 @@ async function createApiError(
   return new ApiError(message, response.status, code, fieldErrors)
 }
 
+/** Send a credentialed request and normalize network and API failures. */
 async function sendRequest(
   path: string,
   init: RequestInit,
@@ -124,6 +129,7 @@ async function sendRequest(
   return parseResponseJson(response)
 }
 
+/** Fetch and validate the CSRF token required for state-changing requests. */
 async function getCsrfToken(): Promise<string> {
   const result: unknown = await sendRequest(
     '/api/auth/csrf',
@@ -146,6 +152,7 @@ async function getCsrfToken(): Promise<string> {
   return result.data.csrfToken
 }
 
+/** Make a typed API request, adding CSRF protection to mutations. */
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
@@ -156,6 +163,7 @@ export async function apiRequest<T>(
   const headers = new Headers(init.headers)
 
   if (isMutation) {
+    // The server requires a fresh CSRF token alongside the session cookie.
     headers.set(csrfHeaderName, await getCsrfToken())
   }
 
@@ -166,6 +174,7 @@ export async function apiRequest<T>(
   )) as T
 }
 
+/** Type guard for API errors consumed by interface components. */
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError
 }

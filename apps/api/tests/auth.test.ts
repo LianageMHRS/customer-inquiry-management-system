@@ -34,6 +34,7 @@ if (
 
 const cleanupPool = new Pool({ connectionString: cleanupConnectionString })
 
+/** Normalize Supertest's set-cookie header for assertions in auth tests. */
 function getSetCookies(response: Response): string[] {
   const cookies = response.headers['set-cookie']
   if (cookies === undefined) {
@@ -43,6 +44,7 @@ function getSetCookies(response: Response): string[] {
   return Array.isArray(cookies) ? cookies : [cookies]
 }
 
+/** Extract and record a test session ID so teardown can remove it. */
 function getSessionId(response: Response): string {
   const sessionCookie = getSetCookies(response).find((cookie) =>
     cookie.startsWith('cim.sid='),
@@ -65,6 +67,7 @@ function getSessionId(response: Response): string {
 }
 
 describe('authentication API', () => {
+  // Create isolated staff accounts shared by this suite's integration cases.
   beforeAll(async () => {
     const passwordHash = await hashPassword(testPassword)
     await pool.query(
@@ -73,6 +76,7 @@ describe('authentication API', () => {
     )
   })
 
+  // Remove test records and sessions so repeated runs remain independent.
   afterAll(async () => {
     if (sessionIds.size > 0) {
       await cleanupPool.query(
@@ -96,6 +100,7 @@ describe('authentication API', () => {
     await cleanupPool.end()
   })
 
+  // Keep database constraints synchronized with shared form/API limits.
   it('keeps database inquiry field limits aligned with shared application limits', async () => {
     const result = await pool.query<{
       column_name: string
@@ -123,6 +128,7 @@ describe('authentication API', () => {
     })
   })
 
+  // Cover CSRF enforcement, session rotation, ownership, validation, and lifecycle.
   it('requires a CSRF token and rotates the session after successful login', async () => {
     const app = createApp()
     const client = request.agent(app)
@@ -507,6 +513,7 @@ describe('authentication API', () => {
     expect((await client.get('/api/auth/me')).status).toBe(401)
   })
 
+  // Prevent account enumeration by returning the same error for both failures.
   it('returns the same generic error for an unknown account and a wrong password', async () => {
     const app = createApp()
     const client = request.agent(app)
@@ -535,6 +542,90 @@ describe('authentication API', () => {
     expect(wrongPassword.body.error.code).toBe('INVALID_CREDENTIALS')
   })
 
+  // Ensure a second session cannot overwrite a status from an older version.
+  it('rejects a stale status update from a second signed-in session', async () => {
+    const app = createApp()
+    const firstTab = request.agent(app)
+    const secondTab = request.agent(app)
+
+    const firstCsrf = await firstTab.get('/api/auth/csrf')
+    getSessionId(firstCsrf)
+    const firstLogin = await firstTab
+      .post('/api/auth/login')
+      .set('Origin', webOrigin)
+      .set('X-CSRF-Token', firstCsrf.body.data.csrfToken as string)
+      .send({ email: testEmail, password: testPassword })
+    expect(firstLogin.status).toBe(200)
+    getSessionId(firstLogin)
+
+    const secondCsrf = await secondTab.get('/api/auth/csrf')
+    getSessionId(secondCsrf)
+    const secondLogin = await secondTab
+      .post('/api/auth/login')
+      .set('Origin', webOrigin)
+      .set('X-CSRF-Token', secondCsrf.body.data.csrfToken as string)
+      .send({ email: testEmail, password: testPassword })
+    expect(secondLogin.status).toBe(200)
+    getSessionId(secondLogin)
+
+    const createCsrf = await firstTab.get('/api/auth/csrf')
+    const createResponse = await firstTab
+      .post('/api/inquiries')
+      .set('Origin', webOrigin)
+      .set('X-CSRF-Token', createCsrf.body.data.csrfToken as string)
+      .send({
+        customerName: 'Concurrent Update Customer',
+        contact: 'concurrent-update@example.test',
+        subject: `Concurrent update ${randomUUID()}`,
+        description: 'An integration test for stale updates across sessions',
+      })
+    expect(createResponse.status).toBe(201)
+
+    const inquiryId = createResponse.body.data.inquiry.id as string
+    const [firstSnapshot, secondSnapshot] = await Promise.all([
+      firstTab.get(`/api/inquiries/${inquiryId}`),
+      secondTab.get(`/api/inquiries/${inquiryId}`),
+    ])
+    expect(firstSnapshot.body.data.inquiry).toMatchObject({
+      status: 'NEW',
+      version: 1,
+    })
+    expect(secondSnapshot.body.data.inquiry).toMatchObject({
+      status: 'NEW',
+      version: 1,
+    })
+
+    const firstUpdateCsrf = await firstTab.get('/api/auth/csrf')
+    const firstUpdate = await firstTab
+      .patch(`/api/inquiries/${inquiryId}/status`)
+      .set('Origin', webOrigin)
+      .set('X-CSRF-Token', firstUpdateCsrf.body.data.csrfToken as string)
+      .send({ status: 'IN_PROGRESS', expectedVersion: 1 })
+    expect(firstUpdate.status).toBe(200)
+    expect(firstUpdate.body.data.inquiry).toMatchObject({
+      status: 'IN_PROGRESS',
+      version: 2,
+    })
+
+    const secondUpdateCsrf = await secondTab.get('/api/auth/csrf')
+    const staleUpdate = await secondTab
+      .patch(`/api/inquiries/${inquiryId}/status`)
+      .set('Origin', webOrigin)
+      .set('X-CSRF-Token', secondUpdateCsrf.body.data.csrfToken as string)
+      .send({ status: 'RESOLVED', expectedVersion: 1 })
+    expect(staleUpdate.status).toBe(409)
+    expect(staleUpdate.body.error.code).toBe('STALE_VERSION')
+
+    const refreshedInquiry = await secondTab.get(`/api/inquiries/${inquiryId}`)
+    expect(refreshedInquiry.status).toBe(200)
+    expect(refreshedInquiry.body.data.inquiry).toMatchObject({
+      status: 'IN_PROGRESS',
+      version: 2,
+      allowedNextStatuses: ['RESOLVED'],
+    })
+  })
+
+  // Reject cross-origin writes before they can reach authentication handlers.
   it('rejects state-changing requests from an untrusted origin', async () => {
     const response = await request(createApp())
       .post('/api/auth/login')

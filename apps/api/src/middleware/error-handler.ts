@@ -3,6 +3,7 @@ import { AppError } from '../errors/app-error.js'
 import { logger } from '../config/logger.js'
 import { invalidCsrfTokenError } from '../security/csrf.js'
 
+/** Convert known failures to safe JSON responses and log unexpected errors. */
 export const errorHandler: ErrorRequestHandler = (
   error: unknown,
   _request,

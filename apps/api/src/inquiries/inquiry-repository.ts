@@ -1,9 +1,6 @@
 import { pool } from '../db/pool.js'
 import type { PoolClient } from 'pg'
-import type {
-  InquirySort,
-  InquiryStatus,
-} from './inquiry.constants.js'
+import type { InquirySort, InquiryStatus } from './inquiry.constants.js'
 
 export type Inquiry = {
   id: string
@@ -49,6 +46,7 @@ export type InquiryListResult = {
   }
 }
 
+/** Convert a database row from snake_case to the API's inquiry shape. */
 function toInquiry(row: InquiryRow): Inquiry {
   return {
     id: row.id,
@@ -69,16 +67,20 @@ const inquiryFields = `
   created_at, updated_at, status_changed_at
 `
 
+/** Search, filter, sort, and paginate inquiries belonging to one staff member. */
 export async function listInquiriesForUser(
   userId: string,
   options: InquiryListOptions,
 ): Promise<InquiryListResult> {
+  // Keep every list query owner-scoped; browser-supplied IDs never choose it.
   const values: (string | number)[] = [userId]
   const conditions = ['created_by_id = $1']
 
   if (options.search !== '') {
-    const escapedSearch = options.search.replace(/[\\%_]/g, (character) =>
-      `\\${character}`,
+    // Escape LIKE wildcards so search text is treated literally.
+    const escapedSearch = options.search.replace(
+      /[\\%_]/g,
+      (character) => `\\${character}`,
     )
     values.push(`%${escapedSearch}%`)
     const searchParameter = `$${values.length}`
@@ -98,13 +100,18 @@ export async function listInquiriesForUser(
     values,
   )
   const total = countResult.rows[0]?.total ?? 0
+  // Sort SQL comes only from this fixed map, never from raw query input.
   const sortSql: Record<InquirySort, string> = {
     newest: 'created_at DESC, id DESC',
     oldest: 'created_at ASC, id ASC',
     customerName: 'customer_name ASC, created_at DESC, id DESC',
     subject: 'subject ASC, created_at DESC, id DESC',
   }
-  const listValues = [...values, options.pageSize, (options.page - 1) * options.pageSize]
+  const listValues = [
+    ...values,
+    options.pageSize,
+    (options.page - 1) * options.pageSize,
+  ]
   const limitParameter = `$${listValues.length - 1}`
   const offsetParameter = `$${listValues.length}`
   const listResult = await pool.query<InquiryRow>(
@@ -127,6 +134,7 @@ export async function listInquiriesForUser(
   }
 }
 
+/** Find an exact same-owner submission made within the duplicate window. */
 export async function findRecentExactDuplicate(
   client: PoolClient,
   userId: string,
@@ -152,6 +160,7 @@ export async function findRecentExactDuplicate(
   return result.rows[0]?.id ?? null
 }
 
+/** Detect a recent same-contact-and-subject inquiry for a warning. */
 export async function hasSimilarRecentInquiry(
   client: PoolClient,
   userId: string,
@@ -174,6 +183,7 @@ export async function hasSimilarRecentInquiry(
   return result.rowCount === 1
 }
 
+/** Insert a new inquiry and return its normalized database representation. */
 export async function insertInquiry(
   client: PoolClient,
   userId: string,
@@ -205,10 +215,12 @@ export async function insertInquiry(
   return toInquiry(inquiry)
 }
 
+/** Find an inquiry only if it is owned by the specified staff account. */
 export async function findInquiryForUser(
   userId: string,
   inquiryId: string,
 ): Promise<Inquiry | null> {
+  // Match the version in the UPDATE itself to prevent a read/write race.
   const result = await pool.query<InquiryRow>(
     `SELECT ${inquiryFields}
      FROM inquiries
@@ -220,6 +232,7 @@ export async function findInquiryForUser(
   return inquiry === undefined ? null : toInquiry(inquiry)
 }
 
+/** Atomically update status only when owner and expected version still match. */
 export async function updateInquiryStatus(
   userId: string,
   inquiryId: string,

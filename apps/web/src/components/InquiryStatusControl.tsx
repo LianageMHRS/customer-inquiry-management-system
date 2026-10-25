@@ -10,6 +10,7 @@ type InquiryStatusControlProps = {
   onStatusChange: (inquiry: Inquiry, status: InquiryStatus) => void
 }
 
+/** Offer only lifecycle transitions allowed for the current inquiry status. */
 export function InquiryStatusControl({
   inquiry,
   disabled,
@@ -31,6 +32,7 @@ export function InquiryStatusControl({
         id={`status-${inquiry.id}`}
         value={inquiry.status}
         disabled={disabled}
+        // Ignore values that are not part of the shared status lifecycle.
         onChange={(event) => {
           const selectedStatus = INQUIRY_STATUSES.find(
             (status) => status === event.target.value,

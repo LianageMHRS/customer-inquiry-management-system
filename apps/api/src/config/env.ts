@@ -19,6 +19,7 @@ const environmentSchema = z
     SEED_USER_TWO_PASSWORD: z.string().optional(),
     SESSION_SECRET: z.string().min(64),
   })
+  // Keep test data confined to an explicitly local, separately named database.
   .superRefine((configuration, context) => {
     if (configuration.NODE_ENV !== 'test') {
       return

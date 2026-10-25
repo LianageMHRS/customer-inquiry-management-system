@@ -4,12 +4,14 @@ import { logger } from './config/logger.js'
 import { pool } from './db/pool.js'
 
 const app = createApp()
+// Log the address only after the server has successfully bound its port.
 const server = app.listen(env.PORT, () => {
   process.stdout.write(`API listening on http://localhost:${env.PORT}\n`)
 })
 
 let isShuttingDown = false
 
+/** Stop accepting requests and close the HTTP server and database pool. */
 function shutdown(signal: NodeJS.Signals) {
   if (isShuttingDown) {
     return
@@ -18,6 +20,7 @@ function shutdown(signal: NodeJS.Signals) {
   isShuttingDown = true
   logger.info({ signal }, 'Shutting down API server')
 
+  // Bound shutdown time so stuck requests cannot keep the process alive forever.
   const timeout = setTimeout(() => {
     logger.error('Graceful shutdown timed out; closing active connections')
     server.closeAllConnections()
@@ -44,6 +47,7 @@ function shutdown(signal: NodeJS.Signals) {
   })
 }
 
+// Handle terminal and service-manager shutdown requests gracefully.
 process.once('SIGINT', () => shutdown('SIGINT'))
 process.once('SIGTERM', () => shutdown('SIGTERM'))
 

@@ -15,6 +15,7 @@ export const pool = new Pool({
   max: 10,
 })
 
+/** Run a database operation atomically and always release its connection. */
 export async function withTransaction<Result>(
   operation: (client: PoolClient) => Promise<Result>,
 ): Promise<Result> {

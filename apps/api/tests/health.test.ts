@@ -3,6 +3,7 @@ import request from 'supertest'
 import { createApp } from '../src/app.js'
 
 describe('GET /api/health', () => {
+  // Confirm health checks disclose only process status, not configuration.
   it('returns a simple healthy response without exposing configuration', async () => {
     const response = await request(createApp()).get('/api/health')
 

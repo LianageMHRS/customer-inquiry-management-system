@@ -14,6 +14,7 @@ import {
   updateStatusSchema,
 } from './inquiry.schemas.js'
 
+/** Read the authenticated owner ID from the server-managed session. */
 function signedInUserId(request: Express.Request): string {
   const userId = request.session.userId
 
@@ -24,6 +25,7 @@ function signedInUserId(request: Express.Request): string {
   return userId
 }
 
+/** Validate list parameters and return this staff member's paged inquiries. */
 export const listInquiries: RequestHandler = async (
   request,
   response,
@@ -57,6 +59,7 @@ export const listInquiries: RequestHandler = async (
   }
 }
 
+/** Validate and create an inquiry owned by the signed-in staff member. */
 export const createInquiryHandler: RequestHandler = async (
   request,
   response,
@@ -84,6 +87,7 @@ export const createInquiryHandler: RequestHandler = async (
   }
 }
 
+/** Validate the path ID and return an owner-scoped inquiry detail. */
 export const getInquiry: RequestHandler = async (request, response, next) => {
   const idResult = z.uuid().safeParse(request.params.id)
 
@@ -103,6 +107,7 @@ export const getInquiry: RequestHandler = async (request, response, next) => {
   }
 }
 
+/** Validate and apply a status change using its expected record version. */
 export const updateInquiryStatus: RequestHandler = async (
   request,
   response,

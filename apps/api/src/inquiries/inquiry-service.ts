@@ -24,6 +24,7 @@ export type InquiryResponseList = Omit<InquiryListResult, 'inquiries'> & {
   inquiries: InquiryResponse[]
 }
 
+/** Add the allowed next status choices derived from the current lifecycle. */
 function toInquiryResponse(inquiry: Inquiry): InquiryResponse {
   return {
     ...inquiry,
@@ -31,6 +32,7 @@ function toInquiryResponse(inquiry: Inquiry): InquiryResponse {
   }
 }
 
+/** Fetch a filtered, paginated list and expose allowed transitions per row. */
 export async function listInquiriesForUser(
   userId: string,
   options: InquiryListOptions,
@@ -42,6 +44,7 @@ export async function listInquiriesForUser(
   }
 }
 
+/** Return one inquiry only when it belongs to the requesting staff member. */
 export async function getInquiryForUser(
   userId: string,
   inquiryId: string,
@@ -55,6 +58,7 @@ export async function getInquiryForUser(
   return toInquiryResponse(inquiry)
 }
 
+/** Create an inquiry while blocking exact repeats and warning on similar ones. */
 export async function createInquiry(
   userId: string,
   input: {
@@ -74,6 +78,8 @@ export async function createInquiry(
       input.subject,
       input.description,
     ])
+    // Serialize matching submissions so concurrent retries cannot both pass
+    // the duplicate check before either insert is visible.
     await client.query(
       'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
       [lockKey],
@@ -116,6 +122,7 @@ export async function createInquiry(
   }
 }
 
+/** Enforce lifecycle and version rules before persisting a status change. */
 export async function changeInquiryStatus(
   userId: string,
   inquiryId: string,
@@ -136,6 +143,7 @@ export async function changeInquiryStatus(
     )
   }
 
+  // Same-status requests are harmless and should not create a new version.
   if (current.status === requestedStatus) {
     return toInquiryResponse(current)
   }
@@ -159,6 +167,7 @@ export async function changeInquiryStatus(
     return toInquiryResponse(updated)
   }
 
+  // Another request may win after the earlier read; treat that race as stale.
   const latest = await findInquiryForUser(userId, inquiryId)
 
   if (latest === null) {

@@ -11,6 +11,7 @@ export interface PublicUser {
   email: string
 }
 
+/** Load a staff account and its password hash for credential verification. */
 export async function findUserByEmail(email: string): Promise<AuthUser | null> {
   const result = await pool.query<AuthUser>(
     `SELECT id, email, password_hash AS "passwordHash"
@@ -22,6 +23,7 @@ export async function findUserByEmail(email: string): Promise<AuthUser | null> {
   return result.rows[0] ?? null
 }
 
+/** Return only public account fields for an authenticated session. */
 export async function findPublicUserById(
   id: string,
 ): Promise<PublicUser | null> {

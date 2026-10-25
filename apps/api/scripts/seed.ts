@@ -14,10 +14,12 @@ const seedConfigSchema = z
     secondUser: seedUserSchema,
   })
   .refine(
+    // Avoid ambiguous credentials when two seeded accounts are configured.
     ({ firstUser, secondUser }) => firstUser.email !== secondUser.email,
     'Seed account emails must be different',
   )
 
+/** Create configured local staff accounts without overwriting existing users. */
 async function seedStaffAccounts(): Promise<void> {
   if (env.NODE_ENV === 'production') {
     throw new Error('The development seed must not run in production')

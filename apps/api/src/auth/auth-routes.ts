@@ -28,11 +28,13 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
+  // Keep rate-limit failures in the shared API error format.
   handler: (_request, _response, next) => {
     next(new AppError(429, 'RATE_LIMITED', 'Too many sign-in attempts'))
   },
 })
 
+/** Wrap session regeneration so route handlers can await and catch failures. */
 function regenerateSession(request: Express.Request): Promise<void> {
   return new Promise((resolve, reject) => {
     request.session.regenerate((error) => {
@@ -45,6 +47,7 @@ function regenerateSession(request: Express.Request): Promise<void> {
   })
 }
 
+/** Persist session changes before sending a response that depends on them. */
 function saveSession(request: Express.Request): Promise<void> {
   return new Promise((resolve, reject) => {
     request.session.save((error) => {
@@ -57,6 +60,7 @@ function saveSession(request: Express.Request): Promise<void> {
   })
 }
 
+/** Wrap session destruction so callers can handle store errors consistently. */
 function destroySession(request: Express.Request): Promise<void> {
   return new Promise((resolve, reject) => {
     request.session.destroy((error) => {
@@ -71,6 +75,7 @@ function destroySession(request: Express.Request): Promise<void> {
 
 const router = Router()
 
+/** Initialize a session and return the CSRF token required for mutations. */
 router.get('/csrf', async (request, response, next) => {
   try {
     request.session.csrfInitialized = true
@@ -85,6 +90,7 @@ router.get('/csrf', async (request, response, next) => {
   }
 })
 
+/** Validate credentials, rotate the session, and return public user details. */
 router.post('/login', loginLimiter, async (request, response, next) => {
   const parsed = loginSchema.safeParse(request.body)
 
@@ -114,6 +120,7 @@ router.post('/login', loginLimiter, async (request, response, next) => {
       return
     }
 
+    // Replace the pre-authentication session ID to prevent session fixation.
     await regenerateSession(request)
     request.session.userId = user.id
     request.session.createdAt = Date.now()
@@ -131,6 +138,7 @@ router.post('/login', loginLimiter, async (request, response, next) => {
   }
 })
 
+/** Resolve the current session to a public user or expire a stale account. */
 router.get('/me', requireAuth, async (request, response, next) => {
   try {
     const userId = request.session.userId
@@ -160,8 +168,10 @@ router.get('/me', requireAuth, async (request, response, next) => {
   }
 })
 
+/** End the authenticated session and issue a fresh anonymous CSRF token. */
 router.post('/logout', requireAuth, async (request, response, next) => {
   try {
+    // Rotate to a fresh anonymous session so the authenticated ID is discarded.
     await regenerateSession(request)
     request.session.csrfInitialized = true
     await saveSession(request)

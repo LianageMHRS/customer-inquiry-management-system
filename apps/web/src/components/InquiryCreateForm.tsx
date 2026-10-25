@@ -23,6 +23,7 @@ const defaultValues: InquiryFormValues = {
   description: '',
 }
 
+/** Render the inquiry form and preserve entered values when saving fails. */
 export function InquiryCreateForm({
   isSubmitting,
   onSuccess,
@@ -42,6 +43,7 @@ export function InquiryCreateForm({
     reValidateMode: 'onChange',
   })
 
+  /** Reset the form only after the parent confirms the API save succeeded. */
   async function submit(values: InquiryFormValues) {
     const succeeded = await onSubmit(values, setError)
     if (succeeded) {

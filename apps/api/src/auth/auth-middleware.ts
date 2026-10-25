@@ -5,6 +5,7 @@ import { AppError } from '../errors/app-error.js'
 const idleTimeoutMs = 30 * 60 * 1000
 const absoluteTimeoutMs = 8 * 60 * 60 * 1000
 
+/** Require a live session and refresh its idle-expiration timestamp. */
 export const requireAuth: RequestHandler = (request, response, next) => {
   const { userId, createdAt, lastSeenAt } = request.session
   const now = Date.now()
@@ -20,6 +21,7 @@ export const requireAuth: RequestHandler = (request, response, next) => {
     now - lastSeenAt >= idleTimeoutMs ||
     now - createdAt >= absoluteTimeoutMs
   ) {
+    // Enforce both idle and maximum session age, then remove the browser cookie.
     request.session.destroy((error) => {
       if (error) {
         next(error)

@@ -5,7 +5,9 @@ import { AppError } from '../errors/app-error.js'
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
 const allowedOrigin = new URL(env.WEB_ORIGIN).origin
 
+/** Reject browser mutations whose Origin differs from the configured web app. */
 export const originProtection: RequestHandler = (request, _response, next) => {
+  // Reads do not mutate state; writes must come from our configured web app.
   if (safeMethods.has(request.method)) {
     next()
     return

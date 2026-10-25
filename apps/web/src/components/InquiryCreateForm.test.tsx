@@ -9,10 +9,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { InquiryCreateForm } from './InquiryCreateForm.js'
 
 describe('InquiryCreateForm', () => {
+  // Clear mounted components after each form interaction test.
   afterEach(() => {
     cleanup()
   })
 
+  // Invalid required fields show individual errors and block submission.
   it('shows field-specific validation errors and does not submit invalid values', async () => {
     const onSubmit = vi.fn()
     const onInvalid = vi.fn()
@@ -35,6 +37,7 @@ describe('InquiryCreateForm', () => {
     expect(onInvalid).toHaveBeenCalledOnce()
   })
 
+  // Trim whitespace before passing valid values to the save callback.
   it('submits trimmed validated values', async () => {
     const onSubmit = vi.fn().mockResolvedValue(true)
     render(
@@ -71,6 +74,7 @@ describe('InquiryCreateForm', () => {
     })
   })
 
+  // Preserve all entered information when the parent reports a save failure.
   it('keeps entered values when submission fails', async () => {
     const onSubmit = vi.fn().mockResolvedValue(false)
     render(
@@ -105,6 +109,7 @@ describe('InquiryCreateForm', () => {
     )
   })
 
+  // Clear the form only after the parent confirms the save succeeded.
   it('clears entered values after successful submission', async () => {
     const onSubmit = vi.fn().mockResolvedValue(true)
     render(

@@ -34,6 +34,7 @@ const inquiry: Inquiry = {
   updatedAt: '2026-10-20T10:00:00.000Z',
 }
 
+/** Mount the inquiry detail route with a stable test inquiry ID. */
 function renderDetailPage() {
   return render(
     <MemoryRouter>
@@ -43,14 +44,17 @@ function renderDetailPage() {
 }
 
 describe('InquiryDetailPage', () => {
+  // Reset request mocks before each detail-loading scenario.
   beforeEach(() => {
     vi.resetAllMocks()
   })
 
+  // Remove mounted React trees after each test.
   afterEach(() => {
     cleanup()
   })
 
+  // Keep a loading state visible until the detail request resolves.
   it('shows a loading state while the inquiry request is pending', () => {
     mockedApiRequest.mockReturnValue(new Promise(() => {}))
 
@@ -64,6 +68,7 @@ describe('InquiryDetailPage', () => {
     )
   })
 
+  // Render all customer and inquiry fields from a successful response.
   it('shows inquiry details after a successful request', async () => {
     mockedApiRequest.mockResolvedValue({
       data: { inquiry },
@@ -83,6 +88,7 @@ describe('InquiryDetailPage', () => {
     )
   })
 
+  // Avoid revealing whether an inaccessible inquiry exists to this user.
   it('shows a non-disclosing message when the inquiry is unavailable', async () => {
     mockedApiRequest.mockRejectedValue(
       new ApiError('Not found', 404, 'NOT_FOUND'),
@@ -100,6 +106,7 @@ describe('InquiryDetailPage', () => {
     ).toBeTruthy()
   })
 
+  // Let staff retry a failed request and display details after recovery.
   it('retries after a request error and displays the inquiry when retry succeeds', async () => {
     mockedApiRequest
       .mockRejectedValueOnce(new ApiError('Service unavailable', 503, 'ERROR'))
