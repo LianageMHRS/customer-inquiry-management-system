@@ -7,10 +7,15 @@ import { env } from '../src/config/env.js'
 import { pool } from '../src/db/pool.js'
 import { createApp } from '../src/app.js'
 import { hashPassword } from '../src/security/password.js'
+import {
+  authenticate,
+  createStaffAccount,
+} from '../src/auth/auth-service.js'
 
 const webOrigin = new URL(env.WEB_ORIGIN).origin
 const testEmail = `auth-${randomUUID()}@example.test`
 const secondTestEmail = `auth-${randomUUID()}@example.test`
+const provisionedEmail = `provisioned-${randomUUID()}@example.test`
 const testPassword = 'a-test-only-password-value'
 const sessionIds = new Set<string>()
 const cleanupConnectionString = env.TEST_MIGRATION_DATABASE_URL
@@ -95,9 +100,38 @@ describe('authentication API', () => {
     )
     await cleanupPool.query(
       'DELETE FROM users WHERE email = ANY($1::varchar[])',
-      [[testEmail, secondTestEmail]],
+      [[testEmail, secondTestEmail, provisionedEmail]],
     )
     await cleanupPool.end()
+  })
+
+  // Verify CLI account provisioning hashes passwords and never overwrites users.
+  it('creates a staff account and leaves an existing account unchanged', async () => {
+    const created = await createStaffAccount(provisionedEmail, testPassword)
+    expect(created).toMatchObject({
+      id: expect.any(String),
+      email: provisionedEmail,
+    })
+
+    const duplicate = await createStaffAccount(
+      provisionedEmail,
+      'a-different-password-value',
+    )
+    expect(duplicate).toBeNull()
+
+    expect(await authenticate(provisionedEmail, testPassword)).toMatchObject({
+      email: provisionedEmail,
+    })
+    expect(
+      await authenticate(provisionedEmail, 'a-different-password-value'),
+    ).toBeNull()
+
+    const account = await pool.query<{ password_hash: string }>(
+      'SELECT password_hash FROM users WHERE email = $1',
+      [provisionedEmail],
+    )
+    expect(account.rows[0]?.password_hash).not.toBe(testPassword)
+    expect(account.rows[0]?.password_hash).toMatch(/^\$argon2id\$/)
   })
 
   // Keep database constraints synchronized with shared form/API limits.

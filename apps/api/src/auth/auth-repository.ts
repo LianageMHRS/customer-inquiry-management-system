@@ -34,3 +34,19 @@ export async function findPublicUserById(
 
   return result.rows[0] ?? null
 }
+
+/** Store a password hash for a new account without replacing an existing one. */
+export async function insertStaffUser(
+  email: string,
+  passwordHash: string,
+): Promise<PublicUser | null> {
+  const result = await pool.query<PublicUser>(
+    `INSERT INTO users (email, password_hash)
+     VALUES ($1, $2)
+     ON CONFLICT (email) DO NOTHING
+     RETURNING id, email`,
+    [email, passwordHash],
+  )
+
+  return result.rows[0] ?? null
+}

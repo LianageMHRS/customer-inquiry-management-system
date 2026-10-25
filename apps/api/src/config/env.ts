@@ -13,10 +13,6 @@ const environmentSchema = z
     MIGRATION_DATABASE_URL: z.url().optional(),
     TEST_DATABASE_URL: z.url().optional(),
     TEST_MIGRATION_DATABASE_URL: z.url().optional(),
-    SEED_USER_ONE_EMAIL: z.email().optional(),
-    SEED_USER_ONE_PASSWORD: z.string().optional(),
-    SEED_USER_TWO_EMAIL: z.email().optional(),
-    SEED_USER_TWO_PASSWORD: z.string().optional(),
     SESSION_SECRET: z.string().min(64),
   })
   // Keep test data confined to an explicitly local, separately named database.

@@ -25,27 +25,33 @@ them through New, In Progress, and Resolved.
    local PostgreSQL server. The migration connection must be allowed to apply
    schema changes; the application connection needs access to the app's data
    and session tables.
-4. Apply the database schema and create local staff accounts:
+4. Apply the database schema:
 
    ```powershell
    npm.cmd run db:migrate
    npm.cmd run db:migrate:test
-   npm.cmd run db:seed
    ```
 
-   The seed accounts use the email addresses in `apps/api/.env.example`:
-   `staff.one@example.test` and `staff.two@example.test`. Choose local
-   passwords for them in `apps/api/.env` before seeding; passwords are not
-   committed to the repository. Seeding is for development only.
+5. Create a staff account from the repository folder. The command asks for the
+   password twice without displaying it:
 
-5. Start the API and website:
+   ```powershell
+   npm.cmd run user:create -- staff@example.com
+   ```
+
+   Run the same command again with a different email for every additional
+   staff member. There is no sign-up page and no fixed limit on accounts.
+   Passwords are hashed before they are saved, and `.env` is used only for
+   application and database configuration—not for a list of staff passwords.
+
+6. Start the API and website:
 
    ```powershell
    npm.cmd run dev
    ```
 
-   Open [http://localhost:5173](http://localhost:5173) and sign in with one
-   of the accounts you seeded. The API runs at
+   Open [http://localhost:5173](http://localhost:5173) and sign in with the
+   staff account you created. The API runs at
    [http://localhost:3000](http://localhost:3000).
 
 ## Tests

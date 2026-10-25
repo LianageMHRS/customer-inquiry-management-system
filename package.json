@@ -13,7 +13,7 @@
     "dev:web": "npm run dev --workspace=@customer-inquiry/web",
     "db:migrate": "npm run db:migrate --workspace=@customer-inquiry/api",
     "db:migrate:test": "npm run db:migrate:test --workspace=@customer-inquiry/api",
-    "db:seed": "npm run db:seed --workspace=@customer-inquiry/api",
+    "user:create": "npm run user:create --workspace=@customer-inquiry/api --",
     "build": "npm run build --workspaces --if-present",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{js,mjs,cjs,ts,tsx,json,md,css,html}\"",
