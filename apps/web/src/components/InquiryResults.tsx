@@ -17,6 +17,8 @@ type InquiryResultsProps = {
   isSubmitting: boolean
   errorMessage: string
   hasActiveFilters: boolean
+  onCreateInquiry: () => void
+  onClearFilters: () => void
   onRetry: () => void
   onPageChange: (page: number) => void
   onStatusChange: (inquiry: Inquiry, status: Inquiry['status']) => void
@@ -31,6 +33,8 @@ export function InquiryResults({
   isSubmitting,
   errorMessage,
   hasActiveFilters,
+  onCreateInquiry,
+  onClearFilters,
   onRetry,
   onPageChange,
   onStatusChange,
@@ -39,7 +43,8 @@ export function InquiryResults({
     <>
       {isLoading ? (
         <p className="table-message" role="status">
-          Loading your inquiries...
+          <span className="loading-spinner" aria-hidden="true" />
+          <span>Loading inquiries...</span>
         </p>
       ) : errorMessage !== '' ? (
         <div className="table-message" role="alert">
@@ -53,13 +58,56 @@ export function InquiryResults({
           </button>
         </div>
       ) : inquiries.length === 0 ? (
-        hasActiveFilters ? (
-          <p className="table-message">
-            No inquiries match these filters. Try a different search or status.
-          </p>
-        ) : (
-          <p className="table-message">You have not added any inquiries yet.</p>
-        )
+        <div className="inquiry-empty-state">
+          <span className="empty-state-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48" fill="none">
+              <path
+                d="M8 20.5h9l3.5 4h7l3.5-4h9v18H8v-18Z"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M8 20.5 12 10h24l4 10.5M18 31h12"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          {hasActiveFilters ? (
+            <>
+              <h3>No matching inquiries</h3>
+              <p>
+                Try changing your search or filters to find the inquiry you’re
+                looking for.
+              </p>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={onClearFilters}
+              >
+                Clear filters
+              </button>
+            </>
+          ) : (
+            <>
+              <h3>No inquiries yet</h3>
+              <p>
+                When your team adds customer inquiries, they’ll appear here.
+                Create the first one to get started.
+              </p>
+              <button
+                className="button"
+                type="button"
+                onClick={onCreateInquiry}
+              >
+                Create an inquiry
+              </button>
+            </>
+          )}
+        </div>
       ) : (
         <div className="table-scroll">
           <table className="inquiry-table">
@@ -69,6 +117,7 @@ export function InquiryResults({
                 <th scope="col">Subject</th>
                 <th scope="col">Customer</th>
                 <th scope="col">Created</th>
+                <th scope="col">Created by</th>
                 <th scope="col">Status</th>
                 <th scope="col">Action</th>
               </tr>
@@ -94,6 +143,7 @@ export function InquiryResults({
                   <td className="created-date">
                     {new Date(inquiry.createdAt).toLocaleDateString()}
                   </td>
+                  <td className="created-by">{inquiry.createdByEmail}</td>
                   <td>
                     <InquiryStatusControl
                       inquiry={inquiry}

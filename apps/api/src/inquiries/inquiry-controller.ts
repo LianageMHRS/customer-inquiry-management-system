@@ -5,8 +5,8 @@ import { toFieldErrors } from '../errors/field-errors.js'
 import {
   changeInquiryStatus,
   createInquiry,
-  getInquiryForUser,
-  listInquiriesForUser,
+  getInquiry as getInquiryService,
+  listInquiries as listInquiriesService,
 } from './inquiry-service.js'
 import {
   createInquirySchema,
@@ -14,7 +14,7 @@ import {
   updateStatusSchema,
 } from './inquiry.schemas.js'
 
-/** Read the authenticated owner ID from the server-managed session. */
+/** Read the inquiry creator ID from the authenticated session. */
 function signedInUserId(request: Express.Request): string {
   const userId = request.session.userId
 
@@ -25,7 +25,7 @@ function signedInUserId(request: Express.Request): string {
   return userId
 }
 
-/** Validate list parameters and return this staff member's paged inquiries. */
+/** Validate list parameters and return the shared staff inbox page. */
 export const listInquiries: RequestHandler = async (
   request,
   response,
@@ -46,7 +46,7 @@ export const listInquiries: RequestHandler = async (
   }
 
   try {
-    const result = await listInquiriesForUser(
+    const result = await listInquiriesService(
       signedInUserId(request),
       parsed.data,
     )
@@ -59,7 +59,7 @@ export const listInquiries: RequestHandler = async (
   }
 }
 
-/** Validate and create an inquiry owned by the signed-in staff member. */
+/** Validate and create an inquiry attributed to the signed-in staff member. */
 export const createInquiryHandler: RequestHandler = async (
   request,
   response,
@@ -80,14 +80,14 @@ export const createInquiryHandler: RequestHandler = async (
   }
 
   try {
-    const result = await createInquiry(signedInUserId(request), parsed.data)
-    response.status(201).json({ data: result })
+    const inquiry = await createInquiry(signedInUserId(request), parsed.data)
+    response.status(201).json({ data: { inquiry } })
   } catch (error) {
     next(error)
   }
 }
 
-/** Validate the path ID and return an owner-scoped inquiry detail. */
+/** Validate the path ID and return an inquiry to authenticated staff. */
 export const getInquiry: RequestHandler = async (request, response, next) => {
   const idResult = z.uuid().safeParse(request.params.id)
 
@@ -97,10 +97,7 @@ export const getInquiry: RequestHandler = async (request, response, next) => {
   }
 
   try {
-    const inquiry = await getInquiryForUser(
-      signedInUserId(request),
-      idResult.data,
-    )
+    const inquiry = await getInquiryService(idResult.data)
     response.json({ data: { inquiry } })
   } catch (error) {
     next(error)
@@ -135,7 +132,6 @@ export const updateInquiryStatus: RequestHandler = async (
 
   try {
     const inquiry = await changeInquiryStatus(
-      signedInUserId(request),
       idResult.data,
       parsed.data.status,
       parsed.data.expectedVersion,

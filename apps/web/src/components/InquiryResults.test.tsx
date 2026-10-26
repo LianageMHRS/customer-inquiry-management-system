@@ -6,6 +6,7 @@ import { InquiryResults, type InquiryPagination } from './InquiryResults.js'
 
 const inquiry: Inquiry = {
   id: 'inquiry-123',
+  createdByEmail: 'staff@example.com',
   customerName: 'Taylor Customer',
   contact: 'taylor@example.com',
   subject: 'Question about an order',
@@ -38,6 +39,8 @@ function renderResults(
         isSubmitting={false}
         errorMessage=""
         hasActiveFilters={false}
+        onCreateInquiry={vi.fn()}
+        onClearFilters={vi.fn()}
         onRetry={vi.fn()}
         onPageChange={vi.fn()}
         onStatusChange={vi.fn()}
@@ -53,22 +56,28 @@ describe('InquiryResults', () => {
     cleanup()
   })
 
-  // Show an accessible progress message while a list request is pending.
-  it('shows a loading message while inquiries are loading', () => {
-    renderResults({ isLoading: true })
+  // Show a visible, accessible progress indicator while the list loads.
+  it('shows a loading spinner and message while inquiries are loading', () => {
+    const { container } = renderResults({ isLoading: true })
 
     expect(screen.getByRole('status').textContent).toContain(
-      'Loading your inquiries...',
+      'Loading inquiries...',
     )
+    expect(container.querySelector('.loading-spinner')).not.toBeNull()
   })
 
-  // Distinguish a truly empty account from filters with no matching rows.
-  it('shows an empty-state message based on whether filters are active', () => {
-    const { rerender } = renderResults({ inquiries: [] })
+  // Give users an appropriate next action for each empty-list situation.
+  it('shows helpful empty states for a new inbox and filters with no matches', () => {
+    const onCreateInquiry = vi.fn()
+    const { rerender } = renderResults({ inquiries: [], onCreateInquiry })
     expect(
-      screen.getByText('You have not added any inquiries yet.'),
+      screen.getByRole('heading', { name: 'No inquiries yet' }),
     ).toBeTruthy()
+    expect(screen.getByText(/Create the first one to get started/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Create an inquiry' }))
+    expect(onCreateInquiry).toHaveBeenCalledOnce()
 
+    const onClearFilters = vi.fn()
     rerender(
       <MemoryRouter>
         <InquiryResults
@@ -79,6 +88,8 @@ describe('InquiryResults', () => {
           isSubmitting={false}
           errorMessage=""
           hasActiveFilters
+          onCreateInquiry={vi.fn()}
+          onClearFilters={onClearFilters}
           onRetry={vi.fn()}
           onPageChange={vi.fn()}
           onStatusChange={vi.fn()}
@@ -86,10 +97,11 @@ describe('InquiryResults', () => {
       </MemoryRouter>,
     )
     expect(
-      screen.getByText(
-        'No inquiries match these filters. Try a different search or status.',
-      ),
+      screen.getByRole('heading', { name: 'No matching inquiries' }),
     ).toBeTruthy()
+    expect(screen.getByText(/Try changing your search or filters/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(onClearFilters).toHaveBeenCalledOnce()
   })
 
   // Hide unnecessary one-page navigation and wire multi-page controls.
@@ -121,6 +133,7 @@ describe('InquiryResults', () => {
     renderResults()
 
     expect(screen.getByText(inquiry.subject)).toBeTruthy()
+    expect(screen.getByText(inquiry.createdByEmail)).toBeTruthy()
     expect(
       screen.getByRole('link', { name: 'Open' }).getAttribute('href'),
     ).toBe(`/inquiries/${inquiry.id}`)

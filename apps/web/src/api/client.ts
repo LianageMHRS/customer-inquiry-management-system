@@ -3,23 +3,27 @@ export const UNAUTHENTICATED_EVENT = 'api:unauthenticated'
 const csrfHeaderName = 'X-CSRF-Token'
 
 export type ApiFieldErrors = Record<string, string[]>
+export type ApiErrorMetadata = Record<string, unknown>
 
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly fieldErrors: ApiFieldErrors
+  readonly metadata: ApiErrorMetadata
 
   constructor(
     message: string,
     status: number,
     code: string,
     fieldErrors: ApiFieldErrors = {},
+    metadata: ApiErrorMetadata = {},
   ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.fieldErrors = fieldErrors
+    this.metadata = metadata
   }
 }
 
@@ -66,6 +70,19 @@ function getFieldErrors(value: unknown): ApiFieldErrors {
   return fieldErrors
 }
 
+/** Keep API error metadata separate from its standard error fields. */
+function getMetadata(value: unknown): ApiErrorMetadata {
+  if (!isRecord(value)) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([key]) => !['code', 'message', 'fieldErrors'].includes(key),
+    ),
+  )
+}
+
 /** Convert the server error envelope into the client's typed error class. */
 async function createApiError(
   response: Response,
@@ -85,12 +102,13 @@ async function createApiError(
     isRecord(apiError) && 'fieldErrors' in apiError
       ? getFieldErrors(apiError.fieldErrors)
       : {}
+  const metadata = getMetadata(apiError)
 
   if (response.status === 401 && !ignoreUnauthorized) {
     window.dispatchEvent(new Event(UNAUTHENTICATED_EVENT))
   }
 
-  return new ApiError(message, response.status, code, fieldErrors)
+  return new ApiError(message, response.status, code, fieldErrors, metadata)
 }
 
 /** Send a credentialed request and normalize network and API failures. */

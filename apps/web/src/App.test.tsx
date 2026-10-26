@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -28,6 +29,7 @@ const user = {
 
 const inquiry: Inquiry = {
   id: 'inquiry-123',
+  createdByEmail: 'staff@example.com',
   customerName: 'Taylor Customer',
   contact: 'taylor@example.com',
   subject: 'Question about an order',
@@ -60,6 +62,7 @@ describe('App', () => {
   afterEach(() => {
     cleanup()
     vi.resetAllMocks()
+    vi.useRealTimers()
   })
 
   // Verify a valid login loads the authenticated inquiry dashboard.
@@ -119,6 +122,34 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Staff sign in' })).toBeTruthy()
   })
 
+  it('shows clear guidance when sign-in attempts are rate limited', async () => {
+    mockedApiRequest
+      .mockRejectedValueOnce(new ApiError('Not signed in', 401, 'UNAUTHORIZED'))
+      .mockRejectedValueOnce(
+        new ApiError('Too many sign-in attempts', 429, 'RATE_LIMITED'),
+      )
+
+    renderApp()
+
+    fireEvent.change(await screen.findByLabelText('Email'), {
+      target: { value: user.email },
+    })
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'wrong-password' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Sign-in temporarily unavailable',
+      }),
+    ).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Please wait for the 15-minute limit window to reset',
+    )
+    expect(screen.getByLabelText('Email')).toHaveProperty('value', user.email)
+  })
+
   // Confirm a failed list request can be retried without reloading the app.
   it('retries a failed inquiry-list request from the dashboard', async () => {
     mockedApiRequest
@@ -141,16 +172,82 @@ describe('App', () => {
     })
   })
 
-  // Ensure user-selected search and status filters are sent to the API.
-  it('submits search and status filters as inquiry-list query parameters', async () => {
+  it('refreshes the visible inbox and announces changes from another staff member', async () => {
+    vi.useFakeTimers()
+    const updatedInquiry: Inquiry = {
+      ...inquiry,
+      createdByEmail: 'another-staff@example.com',
+      status: 'IN_PROGRESS',
+      allowedNextStatuses: ['RESOLVED'],
+      version: 2,
+    }
     mockedApiRequest
       .mockResolvedValueOnce({ data: { user } })
       .mockResolvedValueOnce({ data: [inquiry], pagination })
-      .mockResolvedValueOnce({
-        data: [],
-        pagination: { ...pagination, total: 0, totalPages: 0 },
-      })
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce({ data: [updatedInquiry], pagination })
+
+    renderApp()
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getAllByText('staff@example.com')).toHaveLength(2)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+
+    expect(screen.getByText('another-staff@example.com')).toBeTruthy()
+    expect(
+      screen.getByText(/The team inbox changed\. New or updated inquiries/),
+    ).toBeTruthy()
+  })
+
+  it('keeps current rows visible and offers retry when a background check fails', async () => {
+    vi.useFakeTimers()
+    mockedApiRequest
+      .mockResolvedValueOnce({ data: { user } })
+      .mockResolvedValueOnce({ data: [inquiry], pagination })
+      .mockRejectedValueOnce(new Error('Network unavailable'))
+      .mockResolvedValueOnce({ data: [inquiry], pagination })
+
+    renderApp()
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByText(inquiry.subject)).toBeTruthy()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+
+    expect(screen.getByText(inquiry.subject)).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Could not check for new inbox updates: Network unavailable',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(
+      screen.queryByText(/Could not check for new inbox updates/),
+    ).toBeNull()
+    expect(screen.getByText(inquiry.subject)).toBeTruthy()
+  })
+
+  // Ensure search, status, and creator filters are sent to the API.
+  it('submits search, status, and created-by filters as list query parameters', async () => {
+    mockedApiRequest
+      .mockResolvedValueOnce({ data: { user } })
+      .mockResolvedValueOnce({ data: [inquiry], pagination })
+      .mockResolvedValue({
         data: [],
         pagination: { ...pagination, total: 0, totalPages: 0 },
       })
@@ -164,18 +261,19 @@ describe('App', () => {
     fireEvent.change(screen.getByLabelText('Status'), {
       target: { value: 'IN_PROGRESS' },
     })
+    fireEvent.change(screen.getByLabelText('Created by'), {
+      target: { value: 'MINE' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
     await waitFor(() => {
       expect(mockedApiRequest).toHaveBeenCalledWith(
-        '/api/inquiries?search=delivery+delay&status=IN_PROGRESS&page=1&pageSize=10',
+        '/api/inquiries?search=delivery+delay&status=IN_PROGRESS&createdBy=MINE&page=1&pageSize=10',
         { method: 'GET' },
       )
     })
     expect(
-      await screen.findByText(
-        'No inquiries match these filters. Try a different search or status.',
-      ),
+      await screen.findByRole('heading', { name: 'No matching inquiries' }),
     ).toBeTruthy()
   })
 
@@ -222,6 +320,74 @@ describe('App', () => {
     ).toBe('true')
   })
 
+  it('does not save a duplicate and links to the existing inquiry', async () => {
+    const existingInquiry: Inquiry = {
+      ...inquiry,
+      id: '7c0ed57b-3d3a-4664-b9a6-2cf2870bebc4',
+      createdByEmail: 'another-staff@example.com',
+      status: 'IN_PROGRESS',
+      allowedNextStatuses: ['RESOLVED'],
+      version: 2,
+    }
+    mockedApiRequest
+      .mockResolvedValueOnce({ data: { user } })
+      .mockResolvedValueOnce({ data: [inquiry], pagination })
+      .mockRejectedValueOnce(
+        new ApiError(
+          'A matching inquiry already exists. This submission was not saved.',
+          409,
+          'DUPLICATE_SUBMISSION',
+          {},
+          {
+            existingInquiry: {
+              id: existingInquiry.id,
+              createdByEmail: existingInquiry.createdByEmail,
+              subject: existingInquiry.subject,
+              status: existingInquiry.status,
+              createdAt: existingInquiry.createdAt,
+            },
+          },
+        ),
+      )
+
+    renderApp()
+    await screen.findByText(inquiry.subject)
+    fireEvent.click(screen.getByRole('button', { name: 'New inquiry' }))
+    fireEvent.change(screen.getByLabelText('Customer name'), {
+      target: { value: 'Taylor Customer' },
+    })
+    fireEvent.change(screen.getByLabelText('Contact (email or phone)'), {
+      target: { value: 'taylor@example.com' },
+    })
+    fireEvent.change(screen.getByLabelText('Subject'), {
+      target: { value: inquiry.subject },
+    })
+    fireEvent.change(screen.getByLabelText('Description'), {
+      target: { value: 'A different description for the possible duplicate.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save inquiry' }))
+
+    const warning = await screen.findByRole('alert')
+    expect(warning.textContent).toContain('Duplicate inquiry — not saved')
+    expect(warning.textContent).toContain('all dates')
+    expect(warning.textContent).toContain('another-staff@example.com')
+    expect(warning.textContent).toContain('In progress')
+    expect(
+      screen
+        .getByRole('link', { name: 'Review existing inquiry' })
+        .getAttribute('href'),
+    ).toBe(`/inquiries/${existingInquiry.id}`)
+    expect(screen.getByLabelText('Description')).toHaveProperty(
+      'value',
+      'A different description for the possible duplicate.',
+    )
+    expect(
+      mockedApiRequest.mock.calls.filter(([path]) =>
+        path.startsWith('/api/inquiries?'),
+      ),
+    ).toHaveLength(1)
+  })
+
   // Refresh stale data and prominently tell staff another update won.
   it('refreshes the list and reports a stale status conflict', async () => {
     mockedApiRequest
@@ -257,7 +423,7 @@ describe('App', () => {
     )
     expect(
       screen
-        .getByRole('region', { name: 'Your inquiries' })
+        .getByRole('region', { name: 'Team inquiries' })
         .contains(conflictNotice),
     ).toBe(true)
     await waitFor(() => {

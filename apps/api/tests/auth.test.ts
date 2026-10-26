@@ -7,10 +7,7 @@ import { env } from '../src/config/env.js'
 import { pool } from '../src/db/pool.js'
 import { createApp } from '../src/app.js'
 import { hashPassword } from '../src/security/password.js'
-import {
-  authenticate,
-  createStaffAccount,
-} from '../src/auth/auth-service.js'
+import { authenticate, createStaffAccount } from '../src/auth/auth-service.js'
 
 const webOrigin = new URL(env.WEB_ORIGIN).origin
 const testEmail = `auth-${randomUUID()}@example.test`
@@ -162,7 +159,7 @@ describe('authentication API', () => {
     })
   })
 
-  // Cover CSRF enforcement, session rotation, ownership, validation, and lifecycle.
+  // Cover CSRF enforcement, shared-inbox access, validation, and lifecycle.
   it('requires a CSRF token and rotates the session after successful login', async () => {
     const app = createApp()
     const client = request.agent(app)
@@ -227,6 +224,7 @@ describe('authentication API', () => {
 
     expect(createInquiryResponse.status).toBe(201)
     expect(createInquiryResponse.body.data.inquiry).toMatchObject({
+      createdByEmail: testEmail,
       customerName: 'Test Customer',
       contact: 'test-customer@example.test',
       subject: 'Test inquiry',
@@ -248,24 +246,22 @@ describe('authentication API', () => {
 
     const secondUserList = await secondUserClient.get('/api/inquiries')
     expect(secondUserList.status).toBe(200)
-    expect(secondUserList.body.data).toEqual([])
-
-    const anotherOwnersInquiryId = createInquiryResponse.body.data.inquiry
-      .id as string
-    const inaccessibleDetail = await secondUserClient.get(
-      `/api/inquiries/${anotherOwnersInquiryId}`,
+    expect(secondUserList.body.data).toHaveLength(1)
+    expect(secondUserList.body.data[0].id).toBe(
+      createInquiryResponse.body.data.inquiry.id,
     )
-    expect(inaccessibleDetail.status).toBe(404)
-    expect(inaccessibleDetail.body.error.code).toBe('INQUIRY_NOT_FOUND')
+    const onlyMineList = await secondUserClient
+      .get('/api/inquiries')
+      .query({ createdBy: 'MINE' })
+    expect(onlyMineList.status).toBe(200)
+    expect(onlyMineList.body.data).toEqual([])
 
-    const secondUserUpdateCsrf = await secondUserClient.get('/api/auth/csrf')
-    const inaccessibleUpdate = await secondUserClient
-      .patch(`/api/inquiries/${anotherOwnersInquiryId}/status`)
-      .set('Origin', webOrigin)
-      .set('X-CSRF-Token', secondUserUpdateCsrf.body.data.csrfToken as string)
-      .send({ status: 'IN_PROGRESS', expectedVersion: 1 })
-    expect(inaccessibleUpdate.status).toBe(404)
-    expect(inaccessibleUpdate.body.error.code).toBe('INQUIRY_NOT_FOUND')
+    const sharedInquiryId = createInquiryResponse.body.data.inquiry.id as string
+    const sharedDetail = await secondUserClient.get(
+      `/api/inquiries/${sharedInquiryId}`,
+    )
+    expect(sharedDetail.status).toBe(200)
+    expect(sharedDetail.body.data.inquiry.id).toBe(sharedInquiryId)
 
     const missingUpdateCsrf = await client.get('/api/auth/csrf')
     const missingUpdateResponse = await client
@@ -274,7 +270,7 @@ describe('authentication API', () => {
       .set('X-CSRF-Token', missingUpdateCsrf.body.data.csrfToken as string)
       .send({ status: 'IN_PROGRESS', expectedVersion: 1 })
     expect(missingUpdateResponse.status).toBe(404)
-    expect(missingUpdateResponse.body).toEqual(inaccessibleUpdate.body)
+    expect(missingUpdateResponse.body.error.code).toBe('INQUIRY_NOT_FOUND')
 
     const invalidContactCsrf = await client.get('/api/auth/csrf')
     const invalidContactResponse = await client
@@ -320,6 +316,13 @@ describe('authentication API', () => {
       totalPages: 1,
     })
 
+    await pool.query(
+      `UPDATE inquiries
+       SET created_at = now() - interval '2 days'
+       WHERE id = $1`,
+      [createInquiryResponse.body.data.inquiry.id],
+    )
+
     const duplicateCsrf = await client.get('/api/auth/csrf')
     const duplicateResponse = await client
       .post('/api/inquiries')
@@ -333,9 +336,13 @@ describe('authentication API', () => {
       })
     expect(duplicateResponse.status).toBe(409)
     expect(duplicateResponse.body.error.code).toBe('DUPLICATE_SUBMISSION')
-    expect(duplicateResponse.body.error.existingInquiryId).toBe(
-      createInquiryResponse.body.data.inquiry.id,
-    )
+    expect(duplicateResponse.body.error.existingInquiry).toMatchObject({
+      id: createInquiryResponse.body.data.inquiry.id,
+      createdByEmail: testEmail,
+      subject: 'Test inquiry',
+      status: 'NEW',
+      createdAt: expect.any(String),
+    })
 
     const similarCsrf = await client.get('/api/auth/csrf')
     const similarResponse = await client
@@ -348,10 +355,12 @@ describe('authentication API', () => {
         subject: 'Test inquiry',
         description: 'A different follow-up about the same inquiry',
       })
-    expect(similarResponse.status).toBe(201)
-    expect(similarResponse.body.data.warnings).toEqual([
-      { code: 'POSSIBLE_DUPLICATE' },
-    ])
+    expect(similarResponse.status).toBe(409)
+    expect(similarResponse.body.error.code).toBe('DUPLICATE_SUBMISSION')
+    expect(similarResponse.body.error.existingInquiry.id).toBe(
+      createInquiryResponse.body.data.inquiry.id,
+    )
+    expect(similarResponse.body.error.message).toContain('not saved')
 
     const validPhoneCsrf = await client.get('/api/auth/csrf')
     const validPhoneResponse = await client
@@ -374,7 +383,7 @@ describe('authentication API', () => {
       .get('/api/inquiries')
       .query({ search: 'test', status: 'NEW', sort: 'oldest' })
     expect(searchResponse.status).toBe(200)
-    expect(searchResponse.body.data).toHaveLength(2)
+    expect(searchResponse.body.data).toHaveLength(1)
     expect(searchResponse.body.data[0].subject).toBe('Test inquiry')
 
     const customerSearchResponse = await client
@@ -390,6 +399,12 @@ describe('authentication API', () => {
     expect(invalidListFilter.body.error.code).toBe('VALIDATION_ERROR')
     expect(invalidListFilter.body.error.fieldErrors.status).toBeDefined()
 
+    const invalidCreatorFilter = await client
+      .get('/api/inquiries')
+      .query({ createdBy: testEmail })
+    expect(invalidCreatorFilter.status).toBe(400)
+    expect(invalidCreatorFilter.body.error.fieldErrors.createdBy).toBeDefined()
+
     const paginatedResponse = await client
       .get('/api/inquiries')
       .query({ page: 1, pageSize: 1 })
@@ -398,8 +413,8 @@ describe('authentication API', () => {
     expect(paginatedResponse.body.pagination).toMatchObject({
       page: 1,
       pageSize: 1,
-      total: 3,
-      totalPages: 3,
+      total: 2,
+      totalPages: 2,
     })
 
     const cappedPageSizeResponse = await client
@@ -413,6 +428,50 @@ describe('authentication API', () => {
       .query({ search: "'; DROP TABLE inquiries;--" })
     expect(injectionSearchResponse.status).toBe(200)
     expect(injectionSearchResponse.body.data).toEqual([])
+
+    const crossStaffDuplicateCsrf = await secondUserClient.get('/api/auth/csrf')
+    const crossStaffDuplicate = await secondUserClient
+      .post('/api/inquiries')
+      .set('Origin', webOrigin)
+      .set(
+        'X-CSRF-Token',
+        crossStaffDuplicateCsrf.body.data.csrfToken as string,
+      )
+      .send({
+        customerName: 'Test Customer',
+        contact: 'test-customer@example.test',
+        subject: 'Test inquiry',
+        description: 'A test-only customer inquiry',
+      })
+    expect(crossStaffDuplicate.status).toBe(409)
+    expect(crossStaffDuplicate.body.error.code).toBe('DUPLICATE_SUBMISSION')
+    expect(crossStaffDuplicate.body.error.message).toContain('not saved')
+    expect(crossStaffDuplicate.body.error.existingInquiry).toMatchObject({
+      id: createInquiryResponse.body.data.inquiry.id,
+      createdByEmail: testEmail,
+      subject: 'Test inquiry',
+      status: 'NEW',
+    })
+
+    const ownInquiryList = await secondUserClient
+      .get('/api/inquiries')
+      .query({ createdBy: 'MINE' })
+    expect(ownInquiryList.status).toBe(200)
+    expect(ownInquiryList.body.data).toEqual([])
+    const noDuplicateSaved = await secondUserClient
+      .get('/api/inquiries')
+      .query({ search: 'Test inquiry' })
+    expect(noDuplicateSaved.status).toBe(200)
+    expect(noDuplicateSaved.body.data).toHaveLength(1)
+    expect(noDuplicateSaved.body.pagination.total).toBe(1)
+
+    const sharedDuplicateDetail = await secondUserClient.get(
+      `/api/inquiries/${createInquiryResponse.body.data.inquiry.id as string}`,
+    )
+    expect(sharedDuplicateDetail.status).toBe(200)
+    expect(sharedDuplicateDetail.body.data.inquiry.createdByEmail).toBe(
+      testEmail,
+    )
 
     const detailResponse = await client.get(
       `/api/inquiries/${createInquiryResponse.body.data.inquiry.id}`,
@@ -431,7 +490,6 @@ describe('authentication API', () => {
     )
     expect(missingInquiryResponse.status).toBe(404)
     expect(missingInquiryResponse.body.error.code).toBe('INQUIRY_NOT_FOUND')
-    expect(inaccessibleDetail.body).toEqual(missingInquiryResponse.body)
 
     const updateCsrfResponse = await client.get('/api/auth/csrf')
     const updateResponse = await client
@@ -576,8 +634,8 @@ describe('authentication API', () => {
     expect(wrongPassword.body.error.code).toBe('INVALID_CREDENTIALS')
   })
 
-  // Ensure a second session cannot overwrite a status from an older version.
-  it('rejects a stale status update from a second signed-in session', async () => {
+  // Prove shared status updates work while rejecting an older staff snapshot.
+  it('allows shared updates and rejects a stale version across staff accounts', async () => {
     const app = createApp()
     const firstTab = request.agent(app)
     const secondTab = request.agent(app)
@@ -598,7 +656,7 @@ describe('authentication API', () => {
       .post('/api/auth/login')
       .set('Origin', webOrigin)
       .set('X-CSRF-Token', secondCsrf.body.data.csrfToken as string)
-      .send({ email: testEmail, password: testPassword })
+      .send({ email: secondTestEmail, password: testPassword })
     expect(secondLogin.status).toBe(200)
     getSessionId(secondLogin)
 
@@ -620,6 +678,7 @@ describe('authentication API', () => {
       firstTab.get(`/api/inquiries/${inquiryId}`),
       secondTab.get(`/api/inquiries/${inquiryId}`),
     ])
+    expect(firstSnapshot.status).toBe(200)
     expect(firstSnapshot.body.data.inquiry).toMatchObject({
       status: 'NEW',
       version: 1,
@@ -629,28 +688,28 @@ describe('authentication API', () => {
       version: 1,
     })
 
-    const firstUpdateCsrf = await firstTab.get('/api/auth/csrf')
-    const firstUpdate = await firstTab
+    const secondUpdateCsrf = await secondTab.get('/api/auth/csrf')
+    const secondUpdate = await secondTab
       .patch(`/api/inquiries/${inquiryId}/status`)
       .set('Origin', webOrigin)
-      .set('X-CSRF-Token', firstUpdateCsrf.body.data.csrfToken as string)
+      .set('X-CSRF-Token', secondUpdateCsrf.body.data.csrfToken as string)
       .send({ status: 'IN_PROGRESS', expectedVersion: 1 })
-    expect(firstUpdate.status).toBe(200)
-    expect(firstUpdate.body.data.inquiry).toMatchObject({
+    expect(secondUpdate.status).toBe(200)
+    expect(secondUpdate.body.data.inquiry).toMatchObject({
       status: 'IN_PROGRESS',
       version: 2,
     })
 
-    const secondUpdateCsrf = await secondTab.get('/api/auth/csrf')
-    const staleUpdate = await secondTab
+    const firstUpdateCsrf = await firstTab.get('/api/auth/csrf')
+    const staleUpdate = await firstTab
       .patch(`/api/inquiries/${inquiryId}/status`)
       .set('Origin', webOrigin)
-      .set('X-CSRF-Token', secondUpdateCsrf.body.data.csrfToken as string)
+      .set('X-CSRF-Token', firstUpdateCsrf.body.data.csrfToken as string)
       .send({ status: 'RESOLVED', expectedVersion: 1 })
     expect(staleUpdate.status).toBe(409)
     expect(staleUpdate.body.error.code).toBe('STALE_VERSION')
 
-    const refreshedInquiry = await secondTab.get(`/api/inquiries/${inquiryId}`)
+    const refreshedInquiry = await firstTab.get(`/api/inquiries/${inquiryId}`)
     expect(refreshedInquiry.status).toBe(200)
     expect(refreshedInquiry.body.data.inquiry).toMatchObject({
       status: 'IN_PROGRESS',

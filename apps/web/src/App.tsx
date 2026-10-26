@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import {
   INQUIRY_FIELD_LIMITS,
@@ -30,12 +30,47 @@ const inquiryFields: readonly InquiryField[] = [
 ]
 
 type InquiryListStatus = InquiryStatus | 'ALL'
+type InquiryCreatorFilter = 'ALL' | 'MINE'
+type DuplicateInquiryMatch = {
+  id: string
+  createdByEmail: string
+  subject: string
+  status: InquiryStatus
+  createdAt: string
+}
+
+const INQUIRY_POLL_INTERVAL_MS = 30_000
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
 
 /** Check a URL-derived status before using it as an inquiry filter. */
 function isInquiryListStatus(value: string): value is InquiryListStatus {
   return (
     value === 'ALL' ||
     Object.prototype.hasOwnProperty.call(inquiryStatusLabels, value)
+  )
+}
+
+/** Narrow untrusted API error metadata before using it in the duplicate UI. */
+function isDuplicateInquiryMatch(
+  value: unknown,
+): value is DuplicateInquiryMatch {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    typeof value.id === 'string' &&
+    uuidPattern.test(value.id) &&
+    typeof value.createdByEmail === 'string' &&
+    typeof value.subject === 'string' &&
+    typeof value.createdAt === 'string' &&
+    typeof value.status === 'string' &&
+    Object.prototype.hasOwnProperty.call(inquiryStatusLabels, value.status)
   )
 }
 
@@ -56,6 +91,7 @@ type AuthResponse = {
 /** Coordinate sign-in, inquiry navigation, list state, and user actions. */
 function App() {
   const inquiryDetailMatch = useMatch('/inquiries/:inquiryId')
+  const isInquiryListVisible = inquiryDetailMatch === null
   const navigate = useNavigate()
   const [user, setUser] = useState<User | null>(null)
   const [inquiries, setInquiries] = useState<Inquiry[]>([])
@@ -63,18 +99,32 @@ function App() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<InquiryListStatus>('ALL')
+  const [creatorFilter, setCreatorFilter] =
+    useState<InquiryCreatorFilter>('ALL')
   const [page, setPage] = useState(1)
   const [inquiryListRefresh, setInquiryListRefresh] = useState(0)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
+  const [isSignInRateLimited, setIsSignInRateLimited] = useState(false)
   const [conflictMessage, setConflictMessage] = useState(false)
+  const [externalInboxChange, setExternalInboxChange] = useState(false)
+  const [backgroundRefreshError, setBackgroundRefreshError] = useState('')
+  const [duplicateInquiry, setDuplicateInquiry] =
+    useState<DuplicateInquiryMatch | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingInquiries, setIsLoadingInquiries] = useState(false)
   const [inquiryListError, setInquiryListError] = useState('')
   const [inquiryListRetry, setInquiryListRetry] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false)
+  const isBackgroundRefreshRef = useRef(false)
+  const inquirySnapshotRef = useRef<{
+    query: string
+    total: number
+    versions: Map<string, number>
+  }>({ query: '', total: 0, versions: new Map() })
+  const locallyChangedInquiryIdsRef = useRef(new Set<string>())
 
   // Turn expired-session events into a return to the sign-in screen.
   useEffect(() => {
@@ -127,12 +177,14 @@ function App() {
     }
   }, [])
 
-  // Reload owner-scoped inquiries whenever filters or refresh state changes.
+  // Reload shared inquiries whenever filters or refresh state changes.
   useEffect(() => {
     if (user === null) {
       setInquiries([])
       setPagination(defaultInquiryPagination)
       setInquiryListError('')
+      setBackgroundRefreshError('')
+      inquirySnapshotRef.current = { query: '', total: 0, versions: new Map() }
       return
     }
 
@@ -140,13 +192,20 @@ function App() {
     let isMounted = true
 
     async function loadInquiries() {
-      setIsLoadingInquiries(true)
-      setInquiryListError('')
+      const isBackgroundRefresh = isBackgroundRefreshRef.current
+      isBackgroundRefreshRef.current = false
+      if (isBackgroundRefresh) {
+        setBackgroundRefreshError('')
+      } else {
+        setIsLoadingInquiries(true)
+        setInquiryListError('')
+      }
 
       try {
         const query = new URLSearchParams({
           search,
           status: statusFilter,
+          createdBy: creatorFilter,
           page: String(page),
           pageSize: String(defaultInquiryPagination.pageSize),
         })
@@ -156,20 +215,57 @@ function App() {
         }>(`/api/inquiries?${query.toString()}`, { method: 'GET' })
 
         if (isMounted) {
+          const queryKey = query.toString()
+          const previousSnapshot = inquirySnapshotRef.current
+          let foundExternalChange = false
+          const currentVersions = new Map(
+            result.data.map((inquiry) => [inquiry.id, inquiry.version]),
+          )
+
+          if (previousSnapshot.query === queryKey) {
+            if (previousSnapshot.total !== result.pagination.total) {
+              foundExternalChange = true
+            }
+            for (const inquiry of result.data) {
+              const previousVersion = previousSnapshot.versions.get(inquiry.id)
+              const isKnownLocalChange =
+                locallyChangedInquiryIdsRef.current.has(inquiry.id)
+              if (
+                !isKnownLocalChange &&
+                (previousVersion === undefined ||
+                  inquiry.version > previousVersion)
+              ) {
+                foundExternalChange = true
+              }
+              locallyChangedInquiryIdsRef.current.delete(inquiry.id)
+            }
+          }
+
+          inquirySnapshotRef.current = {
+            query: queryKey,
+            total: result.pagination.total,
+            versions: currentVersions,
+          }
+          if (foundExternalChange) {
+            setExternalInboxChange(true)
+          }
           setInquiries(result.data)
           setPagination(result.pagination)
           setInquiryListError('')
+          setBackgroundRefreshError('')
         }
       } catch (error) {
         if (isMounted) {
-          setInquiryListError(
-            error instanceof Error
-              ? error.message
-              : 'Could not load your inquiries.',
-          )
+          const message =
+            error instanceof Error ? error.message : 'Could not load inquiries.'
+          if (isBackgroundRefresh) {
+            setBackgroundRefreshError(message)
+          } else {
+            setInquiryListError(message)
+          }
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && !isBackgroundRefresh) {
           setIsLoadingInquiries(false)
         }
       }
@@ -180,12 +276,44 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [user, search, statusFilter, page, inquiryListRefresh, inquiryListRetry])
+  }, [
+    user,
+    search,
+    statusFilter,
+    creatorFilter,
+    page,
+    inquiryListRefresh,
+    inquiryListRetry,
+  ])
+
+  // Check for shared inbox changes every 30 seconds, but only while visible.
+  useEffect(() => {
+    if (user === null || !isInquiryListVisible) {
+      return
+    }
+
+    function refreshWhenVisible() {
+      if (document.visibilityState === 'visible') {
+        isBackgroundRefreshRef.current = true
+        setInquiryListRefresh((current) => current + 1)
+      }
+    }
+
+    const intervalId = window.setInterval(
+      refreshWhenVisible,
+      INQUIRY_POLL_INTERVAL_MS,
+    )
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [user, isInquiryListVisible])
 
   /** Sign in through the API and retain only the public staff identity. */
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setMessage('')
+    setIsSignInRateLimited(false)
     setIsSubmitting(true)
 
     try {
@@ -202,11 +330,18 @@ function App() {
       setPassword('')
       setMessage('You are signed in.')
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'Could not connect to the sign-in service.',
-      )
+      if (isApiError(error) && error.code === 'RATE_LIMITED') {
+        setIsSignInRateLimited(true)
+        setMessage(
+          'For your security, sign-in is temporarily paused after several unsuccessful attempts. Please wait for the 15-minute limit window to reset before trying again.',
+        )
+      } else {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : 'Could not connect to the sign-in service.',
+        )
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -240,6 +375,7 @@ function App() {
     setFieldError: UseFormSetError<InquiryFormValues>,
   ): Promise<boolean> {
     setMessage('')
+    setDuplicateInquiry(null)
 
     setIsSubmitting(true)
 
@@ -247,7 +383,6 @@ function App() {
       const result = await apiRequest<{
         data: {
           inquiry: Inquiry
-          warnings: { code: string }[]
         }
       }>('/api/inquiries', {
         method: 'POST',
@@ -255,15 +390,20 @@ function App() {
         body: JSON.stringify(values),
       })
       setPage(1)
+      locallyChangedInquiryIdsRef.current.add(result.data.inquiry.id)
+      setExternalInboxChange(false)
       setInquiryListRefresh((current) => current + 1)
-      setMessage(
-        result.data.warnings.some(({ code }) => code === 'POSSIBLE_DUPLICATE')
-          ? 'Inquiry added. A similar inquiry was submitted recently.'
-          : 'Inquiry added.',
-      )
+      setMessage('Inquiry added.')
       return true
     } catch (error) {
       if (isApiError(error)) {
+        const duplicateInquiry = error.metadata.existingInquiry
+        if (
+          error.code === 'DUPLICATE_SUBMISSION' &&
+          isDuplicateInquiryMatch(duplicateInquiry)
+        ) {
+          setDuplicateInquiry(duplicateInquiry)
+        }
         for (const field of inquiryFields) {
           const fieldMessage = error.fieldErrors[field]?.[0]
           if (fieldMessage !== undefined) {
@@ -292,7 +432,7 @@ function App() {
     setIsSubmitting(true)
 
     try {
-      await apiRequest<{ data: { inquiry: Inquiry } }>(
+      const result = await apiRequest<{ data: { inquiry: Inquiry } }>(
         `/api/inquiries/${inquiry.id}/status`,
         {
           method: 'PATCH',
@@ -305,10 +445,14 @@ function App() {
         },
       )
 
+      locallyChangedInquiryIdsRef.current.add(result.data.inquiry.id)
+      setExternalInboxChange(false)
       setInquiryListRefresh((current) => current + 1)
       setMessage('Inquiry status updated.')
     } catch (error) {
-      if (isApiError(error) && error.status === 409) {
+      if (isApiError(error) && error.code === 'STALE_VERSION') {
+        locallyChangedInquiryIdsRef.current.add(inquiry.id)
+        setExternalInboxChange(false)
         setInquiryListRefresh((current) => current + 1)
         setConflictMessage(true)
         return
@@ -339,6 +483,7 @@ function App() {
         email={email}
         password={password}
         message={message}
+        isRateLimited={isSignInRateLimited}
         isSubmitting={isSubmitting}
         onEmailChange={setEmail}
         onPasswordChange={setPassword}
@@ -402,8 +547,7 @@ function App() {
                   <p className="eyebrow">CUSTOMER SUPPORT</p>
                   <h1>Inquiries</h1>
                   <p className="page-subtitle">
-                    Review and manage customer inquiries created by your
-                    account.
+                    Review and manage inquiries shared with the support team.
                   </p>
                 </div>
                 <button
@@ -435,6 +579,75 @@ function App() {
                 className="panel inquiries-panel"
                 aria-labelledby="list-title"
               >
+                {duplicateInquiry !== null && (
+                  <div className="duplicate-notice" role="alert">
+                    <span className="conflict-notice-icon" aria-hidden="true">
+                      !
+                    </span>
+                    <div>
+                      <h2>Duplicate inquiry — not saved</h2>
+                      <p>
+                        An inquiry with the same contact and exact subject
+                        already exists. Matches are checked across all staff and
+                        all dates. This submission was not saved.
+                      </p>
+                      <p>
+                        Existing record: #
+                        {duplicateInquiry.id.slice(0, 6).toUpperCase()} —{' '}
+                        {inquiryStatusLabels[duplicateInquiry.status]}, created
+                        by {duplicateInquiry.createdByEmail} on{' '}
+                        {new Date(duplicateInquiry.createdAt).toLocaleString()}.
+                      </p>
+                      <Link
+                        className="duplicate-review-link"
+                        to={`/inquiries/${duplicateInquiry.id}`}
+                      >
+                        Review existing inquiry
+                      </Link>
+                    </div>
+                    <button
+                      className="notice-dismiss"
+                      type="button"
+                      aria-label="Dismiss possible duplicate warning"
+                      onClick={() => setDuplicateInquiry(null)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+                {externalInboxChange && (
+                  <div className="inbox-change-notice" role="status">
+                    <p>
+                      The team inbox changed. New or updated inquiries are now
+                      shown.
+                    </p>
+                    <button
+                      className="notice-dismiss"
+                      type="button"
+                      aria-label="Dismiss inbox update notice"
+                      onClick={() => setExternalInboxChange(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+                {backgroundRefreshError !== '' && (
+                  <div className="background-refresh-error" role="alert">
+                    <p>
+                      Could not check for new inbox updates:{' '}
+                      {backgroundRefreshError}
+                    </p>
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() =>
+                        setInquiryListRetry((current) => current + 1)
+                      }
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
                 {conflictMessage && (
                   <div className="conflict-notice" role="alert">
                     <span className="conflict-notice-icon" aria-hidden="true">
@@ -451,8 +664,8 @@ function App() {
                 )}
                 <div className="panel-heading list-heading">
                   <div>
-                    <h2 id="list-title">Your inquiries</h2>
-                    <p>Inquiries created by your staff account.</p>
+                    <h2 id="list-title">Team inquiries</h2>
+                    <p>Shared with all signed-in staff.</p>
                   </div>
                   <span className="record-count">
                     {pagination.total}{' '}
@@ -507,7 +720,29 @@ function App() {
                       )}
                     </select>
                   </label>
-                  {(search !== '' || statusFilter !== 'ALL') && (
+                  <label className="status-filter" htmlFor="creator-filter">
+                    <span>Created by</span>
+                    <select
+                      id="creator-filter"
+                      value={creatorFilter}
+                      onChange={(event) => {
+                        const selectedCreator = event.target.value
+                        if (
+                          selectedCreator === 'ALL' ||
+                          selectedCreator === 'MINE'
+                        ) {
+                          setCreatorFilter(selectedCreator)
+                          setPage(1)
+                        }
+                      }}
+                    >
+                      <option value="ALL">All staff</option>
+                      <option value="MINE">Me</option>
+                    </select>
+                  </label>
+                  {(search !== '' ||
+                    statusFilter !== 'ALL' ||
+                    creatorFilter !== 'ALL') && (
                     <button
                       className="button button-secondary"
                       type="button"
@@ -515,6 +750,7 @@ function App() {
                         setSearchInput('')
                         setSearch('')
                         setStatusFilter('ALL')
+                        setCreatorFilter('ALL')
                         setPage(1)
                       }}
                     >
@@ -530,7 +766,19 @@ function App() {
                   isLoading={isLoadingInquiries}
                   isSubmitting={isSubmitting}
                   errorMessage={inquiryListError}
-                  hasActiveFilters={search !== '' || statusFilter !== 'ALL'}
+                  hasActiveFilters={
+                    search !== '' ||
+                    statusFilter !== 'ALL' ||
+                    creatorFilter !== 'ALL'
+                  }
+                  onCreateInquiry={() => setIsCreateFormOpen(true)}
+                  onClearFilters={() => {
+                    setSearchInput('')
+                    setSearch('')
+                    setStatusFilter('ALL')
+                    setCreatorFilter('ALL')
+                    setPage(1)
+                  }}
                   onRetry={() => setInquiryListRetry((current) => current + 1)}
                   onPageChange={setPage}
                   onStatusChange={(inquiry, status) =>

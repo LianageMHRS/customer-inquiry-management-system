@@ -51,6 +51,7 @@ export const inquiryListQuerySchema = z
   .object({
     search: z.string().trim().max(INQUIRY_FIELD_LIMITS.search).default(''),
     status: z.enum(['ALL', ...INQUIRY_STATUSES]).default('ALL'),
+    createdBy: z.enum(['ALL', 'MINE']).default('ALL'),
     page: z.coerce
       .number()
       .int()
