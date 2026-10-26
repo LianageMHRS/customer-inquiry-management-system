@@ -40,6 +40,48 @@ describe('apiRequest', () => {
     expect(requestInit?.credentials).toBe('include')
   })
 
+  it('preserves safe duplicate-match metadata from API errors', async () => {
+    const duplicateInquiry = {
+      id: '7c0ed57b-3d3a-4664-b9a6-2cf2870bebc4',
+      createdByEmail: 'staff@example.test',
+      subject: 'Delivery question',
+      status: 'IN_PROGRESS',
+      createdAt: '2026-10-24T10:00:00.000Z',
+    }
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { csrfToken: 'csrf-value' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'DUPLICATE_SUBMISSION',
+              message:
+                'A matching inquiry already exists. This submission was not saved.',
+              existingInquiry: duplicateInquiry,
+            },
+          }),
+          {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      apiRequest('/api/inquiries', { method: 'POST' }),
+    ).rejects.toMatchObject({
+      code: 'DUPLICATE_SUBMISSION',
+      metadata: { existingInquiry: duplicateInquiry },
+    })
+  })
+
   // Notify the app when an ordinary authenticated request discovers expiry.
   it('signals the app when a request returns an expired-session response', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(

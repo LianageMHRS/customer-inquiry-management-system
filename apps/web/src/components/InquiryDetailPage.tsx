@@ -63,9 +63,10 @@ export function InquiryDetailPage({ inquiryId }: { inquiryId: string }) {
       </nav>
       {isLoading ? (
         <section className="panel detail-state-card" aria-live="polite">
-          <span className="detail-state-mark" aria-hidden="true">
-            …
-          </span>
+          <span
+            className="loading-spinner loading-spinner-large"
+            aria-hidden="true"
+          />
           <h1>Loading inquiry</h1>
           <p role="status">Please wait while we retrieve the details.</p>
         </section>
@@ -196,6 +197,10 @@ export function InquiryDetailPage({ inquiryId }: { inquiryId: string }) {
                 </div>
               </div>
               <dl className="detail-information detail-timeline">
+                <div>
+                  <dt>Created by</dt>
+                  <dd>{inquiry.createdByEmail}</dd>
+                </div>
                 <div>
                   <dt>Created</dt>
                   <dd>

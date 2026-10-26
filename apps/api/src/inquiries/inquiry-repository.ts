@@ -4,6 +4,7 @@ import type { InquirySort, InquiryStatus } from './inquiry.constants.js'
 
 export type Inquiry = {
   id: string
+  createdByEmail: string
   customerName: string
   contact: string
   subject: string
@@ -17,6 +18,7 @@ export type Inquiry = {
 
 type InquiryRow = {
   id: string
+  created_by_email: string
   customer_name: string
   contact: string
   subject: string
@@ -31,6 +33,7 @@ type InquiryRow = {
 export type InquiryListOptions = {
   search: string
   status: InquiryStatus | 'ALL'
+  createdBy: 'ALL' | 'MINE'
   page: number
   pageSize: number
   sort: InquirySort
@@ -46,10 +49,16 @@ export type InquiryListResult = {
   }
 }
 
+export type DuplicateInquiryMatch = Pick<
+  Inquiry,
+  'id' | 'createdByEmail' | 'subject' | 'status' | 'createdAt'
+>
+
 /** Convert a database row from snake_case to the API's inquiry shape. */
 function toInquiry(row: InquiryRow): Inquiry {
   return {
     id: row.id,
+    createdByEmail: row.created_by_email,
     customerName: row.customer_name,
     contact: row.contact,
     subject: row.subject,
@@ -63,18 +72,23 @@ function toInquiry(row: InquiryRow): Inquiry {
 }
 
 const inquiryFields = `
-  id, customer_name, contact, subject, description, status, version,
-  created_at, updated_at, status_changed_at
+  id, created_by_id, customer_name, contact, subject, description, status,
+  version, created_at, updated_at, status_changed_at
 `
 
-/** Search, filter, sort, and paginate inquiries belonging to one staff member. */
-export async function listInquiriesForUser(
+const inquirySelectFields = `
+  i.id, u.email AS created_by_email, i.customer_name, i.contact, i.subject,
+  i.description, i.status, i.version, i.created_at, i.updated_at,
+  i.status_changed_at
+`
+
+/** Search, filter, sort, and paginate inquiries in the shared staff inbox. */
+export async function listInquiries(
   userId: string,
   options: InquiryListOptions,
 ): Promise<InquiryListResult> {
-  // Keep every list query owner-scoped; browser-supplied IDs never choose it.
-  const values: (string | number)[] = [userId]
-  const conditions = ['created_by_id = $1']
+  const values: (string | number)[] = []
+  const conditions: string[] = []
 
   if (options.search !== '') {
     // Escape LIKE wildcards so search text is treated literally.
@@ -85,27 +99,32 @@ export async function listInquiriesForUser(
     values.push(`%${escapedSearch}%`)
     const searchParameter = `$${values.length}`
     conditions.push(
-      `(customer_name ILIKE ${searchParameter} ESCAPE E'\\\\' OR subject ILIKE ${searchParameter} ESCAPE E'\\\\')`,
+      `(i.customer_name ILIKE ${searchParameter} ESCAPE E'\\\\' OR i.subject ILIKE ${searchParameter} ESCAPE E'\\\\')`,
     )
   }
 
   if (options.status !== 'ALL') {
     values.push(options.status)
-    conditions.push(`status = $${values.length}`)
+    conditions.push(`i.status = $${values.length}`)
   }
 
-  const whereClause = conditions.join(' AND ')
+  if (options.createdBy === 'MINE') {
+    values.push(userId)
+    conditions.push(`i.created_by_id = $${values.length}`)
+  }
+
+  const whereClause = conditions.length > 0 ? conditions.join(' AND ') : 'TRUE'
   const countResult = await pool.query<{ total: number }>(
-    `SELECT count(*)::int AS total FROM inquiries WHERE ${whereClause}`,
+    `SELECT count(*)::int AS total FROM inquiries i WHERE ${whereClause}`,
     values,
   )
   const total = countResult.rows[0]?.total ?? 0
   // Sort SQL comes only from this fixed map, never from raw query input.
   const sortSql: Record<InquirySort, string> = {
-    newest: 'created_at DESC, id DESC',
-    oldest: 'created_at ASC, id ASC',
-    customerName: 'customer_name ASC, created_at DESC, id DESC',
-    subject: 'subject ASC, created_at DESC, id DESC',
+    newest: 'i.created_at DESC, i.id DESC',
+    oldest: 'i.created_at ASC, i.id ASC',
+    customerName: 'i.customer_name ASC, i.created_at DESC, i.id DESC',
+    subject: 'i.subject ASC, i.created_at DESC, i.id DESC',
   }
   const listValues = [
     ...values,
@@ -115,8 +134,9 @@ export async function listInquiriesForUser(
   const limitParameter = `$${listValues.length - 1}`
   const offsetParameter = `$${listValues.length}`
   const listResult = await pool.query<InquiryRow>(
-    `SELECT ${inquiryFields}
-     FROM inquiries
+    `SELECT ${inquirySelectFields}
+     FROM inquiries i
+     JOIN users u ON u.id = i.created_by_id
      WHERE ${whereClause}
      ORDER BY ${sortSql[options.sort]}
      LIMIT ${limitParameter} OFFSET ${offsetParameter}`,
@@ -134,53 +154,41 @@ export async function listInquiriesForUser(
   }
 }
 
-/** Find an exact same-owner submission made within the duplicate window. */
-export async function findRecentExactDuplicate(
+/** Find an inquiry matching the submitted contact and subject at any age. */
+export async function findDuplicateInquiry(
   client: PoolClient,
-  userId: string,
-  input: {
-    contact: string
-    subject: string
-    description: string
-  },
-): Promise<string | null> {
-  const result = await client.query<{ id: string }>(
-    `SELECT id
-     FROM inquiries
-     WHERE created_by_id = $1
-       AND contact = $2
-       AND subject = $3
-       AND description = $4
-       AND created_at >= now() - interval '30 seconds'
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [userId, input.contact, input.subject, input.description],
-  )
-
-  return result.rows[0]?.id ?? null
-}
-
-/** Detect a recent same-contact-and-subject inquiry for a warning. */
-export async function hasSimilarRecentInquiry(
-  client: PoolClient,
-  userId: string,
   input: {
     contact: string
     subject: string
   },
-): Promise<boolean> {
-  const result = await client.query(
-    `SELECT 1
-     FROM inquiries
-     WHERE created_by_id = $1
-       AND contact = $2
-       AND subject = $3
-       AND created_at >= now() - interval '24 hours'
+): Promise<DuplicateInquiryMatch | null> {
+  const result = await client.query<{
+    id: string
+    created_by_email: string
+    subject: string
+    status: InquiryStatus
+    created_at: Date
+  }>(
+    `SELECT i.id, u.email AS created_by_email, i.subject, i.status, i.created_at
+     FROM inquiries i
+     JOIN users u ON u.id = i.created_by_id
+     WHERE i.contact = $1
+       AND i.subject = $2
+     ORDER BY i.created_at DESC, i.id DESC
      LIMIT 1`,
-    [userId, input.contact, input.subject],
+    [input.contact, input.subject],
   )
 
-  return result.rowCount === 1
+  const candidate = result.rows[0]
+  return candidate === undefined
+    ? null
+    : {
+        id: candidate.id,
+        createdByEmail: candidate.created_by_email,
+        subject: candidate.subject,
+        status: candidate.status,
+        createdAt: candidate.created_at,
+      }
 }
 
 /** Insert a new inquiry and return its normalized database representation. */
@@ -195,9 +203,16 @@ export async function insertInquiry(
   },
 ): Promise<Inquiry> {
   const result = await client.query<InquiryRow>(
-    `INSERT INTO inquiries (customer_name, contact, subject, description, created_by_id)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING ${inquiryFields}`,
+    `WITH inserted AS (
+       INSERT INTO inquiries (customer_name, contact, subject, description, created_by_id)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING ${inquiryFields}
+     )
+     SELECT i.id, u.email AS created_by_email, i.customer_name, i.contact,
+       i.subject, i.description, i.status, i.version, i.created_at,
+       i.updated_at, i.status_changed_at
+     FROM inserted i
+     JOIN users u ON u.id = i.created_by_id`,
     [
       input.customerName,
       input.contact,
@@ -215,42 +230,45 @@ export async function insertInquiry(
   return toInquiry(inquiry)
 }
 
-/** Find an inquiry only if it is owned by the specified staff account. */
-export async function findInquiryForUser(
-  userId: string,
+/** Find an inquiry by ID for any authenticated staff member. */
+export async function findInquiryById(
   inquiryId: string,
 ): Promise<Inquiry | null> {
-  // Match the version in the UPDATE itself to prevent a read/write race.
   const result = await pool.query<InquiryRow>(
-    `SELECT ${inquiryFields}
-     FROM inquiries
-     WHERE id = $1 AND created_by_id = $2`,
-    [inquiryId, userId],
+    `SELECT ${inquirySelectFields}
+     FROM inquiries i
+     JOIN users u ON u.id = i.created_by_id
+     WHERE i.id = $1`,
+    [inquiryId],
   )
   const inquiry = result.rows[0]
 
   return inquiry === undefined ? null : toInquiry(inquiry)
 }
 
-/** Atomically update status only when owner and expected version still match. */
+/** Atomically update status only when the expected version still matches. */
 export async function updateInquiryStatus(
-  userId: string,
   inquiryId: string,
   status: InquiryStatus,
   expectedVersion: number,
 ): Promise<Inquiry | null> {
   const result = await pool.query<InquiryRow>(
-    `UPDATE inquiries
-     SET status = $3,
-         version = version + 1,
-         updated_at = now(),
-         status_changed_at = CASE
-           WHEN status <> $3::varchar THEN now()
-           ELSE status_changed_at
-         END
-     WHERE id = $1 AND created_by_id = $2 AND version = $4
-     RETURNING ${inquiryFields}`,
-    [inquiryId, userId, status, expectedVersion],
+    `WITH updated AS (
+       UPDATE inquiries
+       SET status = $2,
+           version = version + 1,
+           updated_at = now(),
+           status_changed_at = CASE
+             WHEN status <> $2::varchar THEN now()
+             ELSE status_changed_at
+           END
+       WHERE id = $1 AND version = $3
+       RETURNING ${inquiryFields}
+     )
+     SELECT ${inquirySelectFields}
+     FROM updated i
+     JOIN users u ON u.id = i.created_by_id`,
+    [inquiryId, status, expectedVersion],
   )
   const inquiry = result.rows[0]
 

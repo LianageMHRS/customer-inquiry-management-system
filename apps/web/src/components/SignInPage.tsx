@@ -4,6 +4,7 @@ type SignInPageProps = {
   email: string
   password: string
   message: string
+  isRateLimited: boolean
   isSubmitting: boolean
   onEmailChange: (email: string) => void
   onPasswordChange: (password: string) => void
@@ -15,6 +16,7 @@ export function SignInPage({
   email,
   password,
   message,
+  isRateLimited,
   isSubmitting,
   onEmailChange,
   onPasswordChange,
@@ -56,9 +58,26 @@ export function SignInPage({
           </button>
         </form>
       </section>
-      <p className="feedback" role="status" aria-live="polite">
-        {message}
-      </p>
+      {message !== '' &&
+        (isRateLimited ? (
+          <div
+            className="feedback feedback-rate-limit"
+            role="alert"
+            aria-live="assertive"
+          >
+            <span className="feedback-icon" aria-hidden="true">
+              !
+            </span>
+            <div>
+              <h2>Sign-in temporarily unavailable</h2>
+              <p>{message}</p>
+            </div>
+          </div>
+        ) : (
+          <p className="feedback" role="alert" aria-live="assertive">
+            {message}
+          </p>
+        ))}
     </main>
   )
 }

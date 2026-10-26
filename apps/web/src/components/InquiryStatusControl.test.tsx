@@ -5,6 +5,7 @@ import { InquiryStatusControl } from './InquiryStatusControl.js'
 
 const resolvedInquiry: Inquiry = {
   id: 'inquiry-123',
+  createdByEmail: 'staff@example.com',
   customerName: 'Taylor Customer',
   contact: 'taylor@example.com',
   subject: 'Question about an order',

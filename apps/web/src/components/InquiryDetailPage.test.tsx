@@ -23,6 +23,7 @@ const mockedApiRequest = vi.mocked(apiRequest)
 
 const inquiry: Inquiry = {
   id: 'inquiry-123',
+  createdByEmail: 'staff@example.com',
   customerName: 'Taylor Customer',
   contact: 'taylor@example.com',
   subject: 'Question about an order',
@@ -54,11 +55,11 @@ describe('InquiryDetailPage', () => {
     cleanup()
   })
 
-  // Keep a loading state visible until the detail request resolves.
-  it('shows a loading state while the inquiry request is pending', () => {
+  // Keep a visible loading spinner until the detail request resolves.
+  it('shows a loading spinner while the inquiry request is pending', () => {
     mockedApiRequest.mockReturnValue(new Promise(() => {}))
 
-    renderDetailPage()
+    const { container } = renderDetailPage()
 
     expect(
       screen.getByRole('heading', { name: 'Loading inquiry' }),
@@ -66,6 +67,7 @@ describe('InquiryDetailPage', () => {
     expect(screen.getByRole('status').textContent).toContain(
       'Please wait while we retrieve the details.',
     )
+    expect(container.querySelector('.loading-spinner-large')).not.toBeNull()
   })
 
   // Render all customer and inquiry fields from a successful response.
@@ -82,6 +84,7 @@ describe('InquiryDetailPage', () => {
     expect(screen.getByText(inquiry.customerName)).toBeTruthy()
     expect(screen.getByText(inquiry.contact)).toBeTruthy()
     expect(screen.getByText(inquiry.description)).toBeTruthy()
+    expect(screen.getByText(inquiry.createdByEmail)).toBeTruthy()
     expect(mockedApiRequest).toHaveBeenCalledWith(
       `/api/inquiries/${encodeURIComponent(inquiry.id)}`,
       { method: 'GET' },

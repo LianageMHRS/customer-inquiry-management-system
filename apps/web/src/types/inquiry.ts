@@ -2,6 +2,7 @@ import type { InquiryStatus } from '@customer-inquiry/shared/inquiry'
 
 export type Inquiry = {
   id: string
+  createdByEmail: string
   customerName: string
   contact: string
   subject: string

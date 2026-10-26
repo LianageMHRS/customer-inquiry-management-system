@@ -4,11 +4,10 @@ import {
   type InquiryStatus,
 } from './inquiry.constants.js'
 import {
-  findRecentExactDuplicate,
-  findInquiryForUser,
-  hasSimilarRecentInquiry,
+  findDuplicateInquiry,
+  findInquiryById,
   insertInquiry,
-  listInquiriesForUser as queryInquiriesForUser,
+  listInquiries as queryInquiries,
   updateInquiryStatus as saveInquiryStatus,
   type InquiryListOptions,
   type InquiryListResult,
@@ -32,24 +31,21 @@ function toInquiryResponse(inquiry: Inquiry): InquiryResponse {
   }
 }
 
-/** Fetch a filtered, paginated list and expose allowed transitions per row. */
-export async function listInquiriesForUser(
+/** Fetch the shared filtered list and expose allowed transitions per row. */
+export async function listInquiries(
   userId: string,
   options: InquiryListOptions,
 ): Promise<InquiryResponseList> {
-  const result = await queryInquiriesForUser(userId, options)
+  const result = await queryInquiries(userId, options)
   return {
     ...result,
     inquiries: result.inquiries.map(toInquiryResponse),
   }
 }
 
-/** Return one inquiry only when it belongs to the requesting staff member. */
-export async function getInquiryForUser(
-  userId: string,
-  inquiryId: string,
-): Promise<InquiryResponse> {
-  const inquiry = await findInquiryForUser(userId, inquiryId)
+/** Return one inquiry to any authenticated staff member. */
+export async function getInquiry(inquiryId: string): Promise<InquiryResponse> {
+  const inquiry = await findInquiryById(inquiryId)
 
   if (inquiry === null) {
     throw new AppError(404, 'INQUIRY_NOT_FOUND', 'Inquiry was not found')
@@ -58,7 +54,7 @@ export async function getInquiryForUser(
   return toInquiryResponse(inquiry)
 }
 
-/** Create an inquiry while blocking exact repeats and warning on similar ones. */
+/** Reject matching contact/subject inquiries before creating a new record. */
 export async function createInquiry(
   userId: string,
   input: {
@@ -67,69 +63,39 @@ export async function createInquiry(
     subject: string
     description: string
   },
-): Promise<{
-  inquiry: InquiryResponse
-  warnings: { code: 'POSSIBLE_DUPLICATE' }[]
-}> {
-  const created = await withTransaction(async (client) => {
-    const lockKey = JSON.stringify([
-      userId,
-      input.contact,
-      input.subject,
-      input.description,
-    ])
-    // Serialize matching submissions so concurrent retries cannot both pass
-    // the duplicate check before either insert is visible.
+): Promise<InquiryResponse> {
+  return withTransaction(async (client) => {
+    const lockKey = JSON.stringify([input.contact, input.subject])
+    // Serialize matches across staff to prevent concurrent duplicate inserts.
     await client.query(
       'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
       [lockKey],
     )
 
-    const existingInquiryId = await findRecentExactDuplicate(
-      client,
-      userId,
-      input,
-    )
+    const existingInquiry = await findDuplicateInquiry(client, input)
 
-    if (existingInquiryId !== null) {
+    if (existingInquiry !== null) {
       throw new AppError(
         409,
         'DUPLICATE_SUBMISSION',
-        'This inquiry was just submitted',
+        'A matching inquiry already exists. This submission was not saved.',
         undefined,
-        { existingInquiryId },
+        { existingInquiry },
       )
     }
 
-    const isSimilarInquiry = await hasSimilarRecentInquiry(
-      client,
-      userId,
-      input,
-    )
     const inquiry = await insertInquiry(client, userId, input)
-
-    return {
-      inquiry,
-      warnings: isSimilarInquiry
-        ? [{ code: 'POSSIBLE_DUPLICATE' as const }]
-        : [],
-    }
+    return toInquiryResponse(inquiry)
   })
-
-  return {
-    inquiry: toInquiryResponse(created.inquiry),
-    warnings: created.warnings,
-  }
 }
 
-/** Enforce lifecycle and version rules before persisting a status change. */
+/** Enforce lifecycle and version rules for any authenticated staff member. */
 export async function changeInquiryStatus(
-  userId: string,
   inquiryId: string,
   requestedStatus: InquiryStatus,
   expectedVersion: number,
 ): Promise<InquiryResponse> {
-  const current = await findInquiryForUser(userId, inquiryId)
+  const current = await findInquiryById(inquiryId)
 
   if (current === null) {
     throw new AppError(404, 'INQUIRY_NOT_FOUND', 'Inquiry was not found')
@@ -157,7 +123,6 @@ export async function changeInquiryStatus(
   }
 
   const updated = await saveInquiryStatus(
-    userId,
     inquiryId,
     requestedStatus,
     expectedVersion,
@@ -168,7 +133,7 @@ export async function changeInquiryStatus(
   }
 
   // Another request may win after the earlier read; treat that race as stale.
-  const latest = await findInquiryForUser(userId, inquiryId)
+  const latest = await findInquiryById(inquiryId)
 
   if (latest === null) {
     throw new AppError(404, 'INQUIRY_NOT_FOUND', 'Inquiry was not found')
