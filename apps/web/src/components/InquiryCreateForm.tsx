@@ -109,7 +109,7 @@ export function InquiryCreateForm({
             </span>
           ) : (
             <span className="field-hint" id="contact-hint">
-              Enter an email address or phone number.
+              Enter an email address or a phone number with 10 digits.
             </span>
           )}
         </div>

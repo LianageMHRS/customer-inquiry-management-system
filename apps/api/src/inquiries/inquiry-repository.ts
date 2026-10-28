@@ -162,6 +162,9 @@ export async function findDuplicateInquiry(
     subject: string
   },
 ): Promise<DuplicateInquiryMatch | null> {
+  const normalizedContact = input.contact.trim().toLowerCase()
+  const normalizedSubject = input.subject.trim().toLowerCase()
+
   const result = await client.query<{
     id: string
     created_by_email: string
@@ -172,11 +175,11 @@ export async function findDuplicateInquiry(
     `SELECT i.id, u.email AS created_by_email, i.subject, i.status, i.created_at
      FROM inquiries i
      JOIN users u ON u.id = i.created_by_id
-     WHERE i.contact = $1
-       AND i.subject = $2
+     WHERE LOWER(i.contact) = LOWER($1)
+       AND LOWER(i.subject) = LOWER($2)
      ORDER BY i.created_at DESC, i.id DESC
      LIMIT 1`,
-    [input.contact, input.subject],
+    [normalizedContact, normalizedSubject],
   )
 
   const candidate = result.rows[0]

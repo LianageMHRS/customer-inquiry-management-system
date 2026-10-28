@@ -11,15 +11,15 @@ const contactSchema = z
     INQUIRY_FIELD_LIMITS.contact,
     `Use ${INQUIRY_FIELD_LIMITS.contact} characters or fewer.`,
   )
-  // Accept email or a phone number with the required digit count.
+  // Accept email or a phone number containing exactly 10 digits.
   .refine((contact) => {
     if (z.email().safeParse(contact).success) {
       return true
     }
 
     const digitCount = contact.replace(/\D/g, '').length
-    return phonePattern.test(contact) && digitCount >= 7 && digitCount <= 15
-  }, 'Enter a valid email address or a phone number with 7–15 digits.')
+    return phonePattern.test(contact) && digitCount === 10
+  }, 'Enter a valid email address or a phone number with 10 digits.')
 
 /** Build a trimmed, non-empty text validator with a shared length limit. */
 function requiredText(maxLength: number) {

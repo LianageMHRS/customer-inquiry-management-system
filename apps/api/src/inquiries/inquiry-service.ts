@@ -65,7 +65,9 @@ export async function createInquiry(
   },
 ): Promise<InquiryResponse> {
   return withTransaction(async (client) => {
-    const lockKey = JSON.stringify([input.contact, input.subject])
+    const normalizedContact = input.contact.trim().toLowerCase()
+    const normalizedSubject = input.subject.trim().toLowerCase()
+    const lockKey = JSON.stringify([normalizedContact, normalizedSubject])
     // Serialize matches across staff to prevent concurrent duplicate inserts.
     await client.query(
       'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',

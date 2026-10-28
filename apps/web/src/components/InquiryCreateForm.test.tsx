@@ -37,6 +37,42 @@ describe('InquiryCreateForm', () => {
     expect(onInvalid).toHaveBeenCalledOnce()
   })
 
+  it('requires phone contacts to contain exactly 10 digits', async () => {
+    const onSubmit = vi.fn()
+    const onInvalid = vi.fn()
+
+    render(
+      <InquiryCreateForm
+        isSubmitting={false}
+        onSuccess={vi.fn()}
+        onSubmit={onSubmit}
+        onInvalid={onInvalid}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Customer name'), {
+      target: { value: 'Taylor Customer' },
+    })
+    fireEvent.change(screen.getByLabelText('Contact (email or phone)'), {
+      target: { value: '123456789' },
+    })
+    fireEvent.change(screen.getByLabelText('Subject'), {
+      target: { value: 'Order question' },
+    })
+    fireEvent.change(screen.getByLabelText('Description'), {
+      target: { value: 'Please check my order.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save inquiry' }))
+
+    expect(
+      await screen.findByText(
+        'Enter a valid email address or a phone number with 10 digits.',
+      ),
+    ).toBeTruthy()
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onInvalid).toHaveBeenCalledOnce()
+  })
+
   // Trim whitespace before passing valid values to the save callback.
   it('submits trimmed validated values', async () => {
     const onSubmit = vi.fn().mockResolvedValue(true)

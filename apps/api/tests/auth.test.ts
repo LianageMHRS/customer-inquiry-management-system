@@ -288,6 +288,31 @@ describe('authentication API', () => {
     expect(invalidContactResponse.body.error.code).toBe('VALIDATION_ERROR')
     expect(invalidContactResponse.body.error.fieldErrors.contact).toBeDefined()
 
+    for (const contact of ['123456789', '12345678901']) {
+      const invalidPhoneLengthCsrf = await client.get('/api/auth/csrf')
+      const invalidPhoneLengthResponse = await client
+        .post('/api/inquiries')
+        .set('Origin', webOrigin)
+        .set(
+          'X-CSRF-Token',
+          invalidPhoneLengthCsrf.body.data.csrfToken as string,
+        )
+        .send({
+          customerName: 'Test Customer',
+          contact,
+          subject: 'Invalid phone length',
+          description: 'Phone contacts must contain exactly 10 digits',
+        })
+
+      expect(invalidPhoneLengthResponse.status).toBe(400)
+      expect(invalidPhoneLengthResponse.body.error.code).toBe(
+        'VALIDATION_ERROR',
+      )
+      expect(
+        invalidPhoneLengthResponse.body.error.fieldErrors.contact,
+      ).toBeDefined()
+    }
+
     const extraFieldCsrf = await client.get('/api/auth/csrf')
     const extraFieldResponse = await client
       .post('/api/inquiries')
@@ -295,7 +320,7 @@ describe('authentication API', () => {
       .set('X-CSRF-Token', extraFieldCsrf.body.data.csrfToken as string)
       .send({
         customerName: 'Test Customer',
-        contact: '+1 (555) 123-4567',
+        contact: '555-123-4567',
         subject: 'Unknown field',
         description: 'Unknown fields are rejected',
         createdById: randomUUID(),
@@ -362,6 +387,23 @@ describe('authentication API', () => {
     )
     expect(similarResponse.body.error.message).toContain('not saved')
 
+    const caseVariantCsrf = await client.get('/api/auth/csrf')
+    const caseVariantResponse = await client
+      .post('/api/inquiries')
+      .set('Origin', webOrigin)
+      .set('X-CSRF-Token', caseVariantCsrf.body.data.csrfToken as string)
+      .send({
+        customerName: 'Test Customer',
+        contact: 'TEST-CUSTOMER@EXAMPLE.TEST',
+        subject: 'TEST INQUIRY',
+        description: 'Same inquiry with different letter case should be blocked',
+      })
+    expect(caseVariantResponse.status).toBe(409)
+    expect(caseVariantResponse.body.error.code).toBe('DUPLICATE_SUBMISSION')
+    expect(caseVariantResponse.body.error.existingInquiry.id).toBe(
+      createInquiryResponse.body.data.inquiry.id,
+    )
+
     const validPhoneCsrf = await client.get('/api/auth/csrf')
     const validPhoneResponse = await client
       .post('/api/inquiries')
@@ -369,15 +411,13 @@ describe('authentication API', () => {
       .set('X-CSRF-Token', validPhoneCsrf.body.data.csrfToken as string)
       .send({
         customerName: 'Phone Customer',
-        contact: '+1 (555) 123-4567',
+        contact: '555-123-4567',
         subject: 'Phone contact accepted',
         description: 'A valid phone contact is accepted',
       })
 
     expect(validPhoneResponse.status).toBe(201)
-    expect(validPhoneResponse.body.data.inquiry.contact).toBe(
-      '+1 (555) 123-4567',
-    )
+    expect(validPhoneResponse.body.data.inquiry.contact).toBe('555-123-4567')
 
     const searchResponse = await client
       .get('/api/inquiries')

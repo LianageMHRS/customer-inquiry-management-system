@@ -14,7 +14,7 @@ const contactSchema = z
   .trim()
   .min(1)
   .max(INQUIRY_FIELD_LIMITS.contact)
-  // Accept email or a phone number with the required digit count.
+  // Accept email or a phone number containing exactly 10 digits.
   .refine(
     (contact) => {
       if (z.email().safeParse(contact).success) {
@@ -22,9 +22,9 @@ const contactSchema = z
       }
 
       const digitCount = contact.replace(/\D/g, '').length
-      return phonePattern.test(contact) && digitCount >= 7 && digitCount <= 15
+      return phonePattern.test(contact) && digitCount === 10
     },
-    { message: 'Enter a valid email address or phone number' },
+    { message: 'Enter a valid email address or a phone number with 10 digits' },
   )
 
 export const createInquirySchema = z
